@@ -35,7 +35,6 @@ def send_telegram_message(message):
         print(f"🚫 텔레그램 요청 중 오류 발생: {e}")
 
 # 텔레그램 메시지 템플릿 모음
-
 MSG_AUTO_TRADE_START = (
     "🚀 <b>[자동매매 시작]</b>\n"
     "📍코인: <b>{market}</b>\n"

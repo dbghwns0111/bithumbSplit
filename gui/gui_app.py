@@ -24,7 +24,7 @@ ctk.set_default_color_theme("dark-blue")
 # GUI 앱 생성
 app = ctk.CTk()
 app.title("AutoBitTrade")
-app.geometry("600x800")
+app.geometry("600x1000")
 
 # 전역 변수
 stop_flag = False
@@ -79,6 +79,10 @@ def update_price_info():
                 
                 # 코인 가격 업데이트
                 coins = ["BTC", "USDT", "XRP"]
+                strategy_coin = strategy_info.get("market")
+                if strategy_coin:
+                    coins.append(strategy_coin)
+                    
                 for coin in coins:
                     try:
                         price = get_current_price_temp(coin)  # 임시 함수 사용
@@ -92,6 +96,10 @@ def update_price_info():
                         
                         app.after(0, update_coin_price)
                         
+                        if coin == strategy_info.get("market"):
+                            strategy_info["current_price"] = price
+                            app.after(0, update_strategy_summary)
+
                     except Exception as e:
                         print(f"[ERROR] {coin} 가격 조회 중 오류: {e}")
                         
@@ -121,9 +129,14 @@ def update_strategy_summary():
 
         summary_labels["market"].configure(text=f"코인: {strategy_info['market']}")
         summary_labels["start_price"].configure(text=f"시작가: {start:,.0f} KRW")
-        summary_labels["profit"].configure(text=f"수익액: {profit:,.0f} KRW", text_color="green" if profit >= 0 else "red")
+        summary_labels["current_price"].configure(text=f"현재가: {current:,.0f} KRW")  # 추가
+        summary_labels["profit"].configure(
+            text=f"총 수익: {profit:,.0f} KRW", 
+            text_color="green" if profit >= 0 else "red"
+        )
     except Exception as e:
         print(f"[ERROR] update_strategy_summary: {e}")
+
 
 def update_order_status(level, text):
     """주문 상태 업데이트 - 메인 스레드에서 안전하게 실행"""
@@ -164,8 +177,9 @@ def process_status_updates():
                                         buy_price = float(buy_price_str)
                                         
                                         # 수익 계산 (간단한 예시)
-                                        profit_rate = ((price - buy_price) / buy_price) * 100
-                                        
+                                        fee_rate = 0.0008  # 매도, 매수 수수료 0.04% -> 총 0.08%
+                                        profit_rate = ((price * (1 - fee_rate)) - (buy_price * (1 + fee_rate))) / (buy_price * (1 + fee_rate)) * 100
+
                                         label.configure(
                                             text=f"[{level}차] 매도 체결 ✅\n수익률: {profit_rate:+.2f}%",
                                             text_color="green" if profit_rate >= 0 else "red"
@@ -478,17 +492,24 @@ summary_labels["market"] = ctk.CTkLabel(info_frame1, text="코인: -", font=ctk.
 summary_labels["market"].pack(side="left", padx=10, pady=8)
 
 # 두 번째 행: 시작가
-info_frame2 = ctk.CTkFrame(summary_frame)
-info_frame2.grid(row=2, column=0, sticky="ew", padx=10, pady=2)
+info_frame_start = ctk.CTkFrame(summary_frame)
+info_frame_start.grid(row=2, column=0, sticky="ew", padx=10, pady=2)
 
-summary_labels["start_price"] = ctk.CTkLabel(info_frame2, text="시작가: -", font=ctk.CTkFont(size=14))
+summary_labels["start_price"] = ctk.CTkLabel(info_frame_start, text="시작가: -", font=ctk.CTkFont(size=14))
 summary_labels["start_price"].pack(side="left", padx=10, pady=8)
 
-# 세 번째 행: 수익액
-info_frame3 = ctk.CTkFrame(summary_frame)
-info_frame3.grid(row=3, column=0, sticky="ew", padx=10, pady=2)
+# 세 번째 행: 현재가
+info_frame_current = ctk.CTkFrame(summary_frame)
+info_frame_current.grid(row=3, column=0, sticky="ew", padx=10, pady=2)
 
-summary_labels["profit"] = ctk.CTkLabel(info_frame3, text="수익액: -", font=ctk.CTkFont(size=14, weight="bold"))
+summary_labels["current_price"] = ctk.CTkLabel(info_frame_current, text="현재가: -", font=ctk.CTkFont(size=14))
+summary_labels["current_price"].pack(side="left", padx=10, pady=8)
+
+# 네 번째 행: 수익액
+info_frame_profit = ctk.CTkFrame(summary_frame)
+info_frame_profit.grid(row=4, column=0, sticky="ew", padx=10, pady=2)
+
+summary_labels["profit"] = ctk.CTkLabel(info_frame_profit, text="총 수익: -", font=ctk.CTkFont(size=14, weight="bold"))
 summary_labels["profit"].pack(side="left", padx=10, pady=8)
 
 ### 3. 주문 상태 스크롤 카드뷰

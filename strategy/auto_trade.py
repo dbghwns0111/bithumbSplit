@@ -141,9 +141,17 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                     level.sell_filled = True
                     callback_flags['sell'].add(level.level)
 
-                    profit = (level.sell_price - level.buy_price) * level.volume
+                    # ✅ 빗썸 수수료 반영 수익 계산
+                    fee_rate = 0.0004
+
+                    # 실거래 기준 수익 계산
+                    buy_cost = level.buy_price * (1 + fee_rate)
+                    sell_income = level.sell_price * (1 - fee_rate)
+                    profit = (sell_income - buy_cost) * level.volume
+
                     realized_profit += profit
                     strategy_info["realized_profit"] = realized_profit
+
                     print(f"💰 [{level.level}차] 매도 체결 완료: {level.sell_price}원 / 수익 {profit:.0f}원")
                     send_telegram_message(MSG_SELL_FILLED.format(market=market, level=level.level, sell_price=level.sell_price, volume=level.volume, profit=profit, realized_profit=realized_profit))
 
