@@ -154,16 +154,26 @@ def cancel_all_orders(market):
     print(f"📋 {market} 미체결 주문 조회 중...")
     orders = get_order_list(market)
 
+    # 응답이 dict가 아니거나 에러인 경우 처리
+    if not isinstance(orders, list):
+        if isinstance(orders, dict):
+            error_msg = orders.get('message', 'Unknown error')
+            print(f"⚠️ 주문 조회 실패: {error_msg}")
+        else:
+            print(f"⚠️ 주문 조회 실패: 예상치 못한 응답 형식")
+        return
+
     if not orders:
         print("✅ 취소할 주문 없음")
         return
 
     for order in orders:
-        uuid = order.get("order_id") or order.get("uuid")
-        if uuid:
-            res = cancel_order(uuid)
-            print(f"🗑️ 주문 취소 요청: {uuid} → {res}")
-            time.sleep(0.2)
+        if isinstance(order, dict):
+            uuid = order.get("order_id") or order.get("uuid")
+            if uuid:
+                res = cancel_order(uuid)
+                print(f"🗑️ 주문 취소 요청: {uuid} → {res}")
+                time.sleep(0.2)
 
 # 현재가 조회
 def get_current_price(market='KRW-BTC', retries=3, delay=1, backoff=2):
