@@ -1,4 +1,4 @@
-# AutoBitTrade/main.py
+# bithumbSplit/main.py
 # 무한 반복형 자동매매 전략 실행 (auto_trade.py 기반)
 
 from strategy.auto_trade import run_auto_trade

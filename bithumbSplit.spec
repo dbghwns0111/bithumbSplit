@@ -1,4 +1,4 @@
-# AutoBitTrade.spec
+# bithumbSplit.spec
 # -*- mode: python ; coding: utf-8 -*-
 block_cipher = None
 
@@ -11,8 +11,16 @@ a = Analysis(
         ('config/tick_table.py', 'config'),
         ('api/api.py', 'api'),
         ('utils/telegram.py', 'utils'),
+        ('strategy/auto_trade.py', 'strategy'),
+        ('shared/state.py', 'shared'),
     ],
-    hiddenimports=[],
+    hiddenimports=[
+        'strategy.auto_trade',
+        'api.api',
+        'config.tick_table',
+        'utils.telegram',
+        'shared.state',
+    ],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
@@ -28,13 +36,13 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='AutoBitTrade',
+    name='bithumbSplit',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     console=False,
-    icon="images/AutoBitTrade-icon.png"
+    icon="images/bithumbSplit.png"
 )
 
 coll = COLLECT(
@@ -45,5 +53,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='AutoBitTrade'
+    name='bithumbSplit'
 )

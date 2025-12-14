@@ -8,13 +8,22 @@ import time
 import json
 from urllib.parse import urlencode
 import requests
+from requests.exceptions import RequestException
 import jwt
+from utils.telegram import send_telegram_message
 from dotenv import load_dotenv
 
 # .env 파일 로드
 load_dotenv()
 accessKey = os.getenv("BITHUMB_API_KEY")
 secretKey = os.getenv("BITHUMB_API_SECRET")
+
+def _alert(msg: str):
+    try:
+        send_telegram_message(msg)
+    except Exception:
+        # 텔레그램 전송 실패는 무시하고 넘어간다.
+        pass
 apiUrl = 'https://api.bithumb.com'
 
 # 공통: JWT 토큰 생성 함수
@@ -52,7 +61,7 @@ def get_order_chance(market='KRW-BTC'):
     return resp.json()
 
 # 주문 실행 함수 (지정가 또는 시장가)
-def place_order(market, side, volume, price, ord_type='limit'):
+def place_order(market, side, volume, price, ord_type='limit', retries=3, delay=1, backoff=2):
     body = {
         "market": market,
         "side": side,
@@ -62,33 +71,52 @@ def place_order(market, side, volume, price, ord_type='limit'):
     }
     headers = _make_token(body)
     headers['Content-Type'] = 'application/json'
-    resp = requests.post(f"{apiUrl}/v1/orders", headers=headers, data=json.dumps(body))
-    return resp.json()
+
+    cur_delay = delay
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.post(f"{apiUrl}/v1/orders", headers=headers, data=json.dumps(body), timeout=5)
+            return resp.json()
+        except RequestException as e:
+            if attempt == retries:
+                _alert(f"🚨 주문 요청 실패({attempt}/{retries}) {market} {side} {price}: {e}")
+                return {"status": "9999", "message": str(e)}
+            time.sleep(cur_delay)
+            cur_delay *= backoff
 
 # 주문 취소 함수 (UUID 기반)
-def cancel_order(order_uuid):
-    try:
-        param = {'uuid': order_uuid}
-        headers = _make_token(param)
-        response = requests.delete(f"{apiUrl}/v1/order", params=param, headers=headers)
-        return response.json()
-    except Exception as e:
-        return {"status": "9999", "message": str(e)}
+def cancel_order(order_uuid, retries=3, delay=1, backoff=2):
+    param = {'uuid': order_uuid}
+    headers = _make_token(param)
+    cur_delay = delay
+    for attempt in range(1, retries + 1):
+        try:
+            response = requests.delete(f"{apiUrl}/v1/order", params=param, headers=headers, timeout=5)
+            return response.json()
+        except RequestException as e:
+            if attempt == retries:
+                _alert(f"🚨 주문 취소 실패({attempt}/{retries}) {order_uuid}: {e}")
+                return {"status": "9999", "message": str(e)}
+            time.sleep(cur_delay)
+            cur_delay *= backoff
 
 # 개별 주문 조회
-def get_order_detail(order_uuid, retries=3, delay=1):
+def get_order_detail(order_uuid, retries=3, delay=1, backoff=2):
     query = {"uuid": order_uuid}
     headers = _make_token(query)
+    cur_delay = delay
 
-    for attempt in range(retries):
+    for attempt in range(1, retries + 1):
         try:
             resp = requests.get(f"{apiUrl}/v1/order", params=query, headers=headers, timeout=5)
             return resp.json()
-        except requests.exceptions.RequestException as e:
-            print(f"[{attempt + 1}/{retries}] 주문 조회 실패: {e}")
-            time.sleep(delay)
-
-    return {"status": "9999", "message": "get_order_detail 요청 실패: 최대 재시도 초과"}
+        except RequestException as e:
+            print(f"[{attempt}/{retries}] 주문 조회 실패: {e}")
+            if attempt == retries:
+                _alert(f"🚨 주문 조회 실패({attempt}/{retries}) {order_uuid}: {e}")
+                return {"status": "9999", "message": str(e)}
+            time.sleep(cur_delay)
+            cur_delay *= backoff
 
 # 주문 리스트 조회
 
@@ -124,15 +152,30 @@ def cancel_all_orders(market):
             time.sleep(0.2)
 
 # 현재가 조회
-def get_current_price(market='KRW-BTC'):
+def get_current_price(market='KRW-BTC', retries=3, delay=1, backoff=2):
     query = {"currency": market.split('-')[1]}
-    resp = requests.get(f"{apiUrl}/public/ticker/{market}", params=query)
-    data = resp.json()
-    if data['status'] == '0000':
-        return float(data['data']['closing_price'])
-    else:
-        print(f"❌ 현재가 조회 실패: {data['message']}")
-        return None
+    cur_delay = delay
+
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.get(f"{apiUrl}/public/ticker/{market}", params=query, timeout=5)
+            data = resp.json()
+            if data.get('status') == '0000':
+                return float(data['data']['closing_price'])
+            else:
+                msg = data.get('message', 'unknown error')
+                print(f"❌ 현재가 조회 실패: {msg}")
+                if attempt == retries:
+                    _alert(f"🚨 현재가 조회 실패({attempt}/{retries}) {market}: {msg}")
+                else:
+                    time.sleep(cur_delay)
+                    cur_delay *= backoff
+        except RequestException as e:
+            if attempt == retries:
+                _alert(f"🚨 현재가 조회 실패({attempt}/{retries}) {market}: {e}")
+                return None
+            time.sleep(cur_delay)
+            cur_delay *= backoff
     
 # 주문 취소 함수
 # - 매수 체결 시: (n-1)차 매도 주문 취소 추가

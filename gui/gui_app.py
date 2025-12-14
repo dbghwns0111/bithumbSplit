@@ -1,5 +1,5 @@
 ## File: gui/gui_app.py
-# AutoBitTrade GUI Application - Fixed Version
+# bithumbSplit GUI Application - Fixed Version
 
 import os
 import sys
@@ -23,7 +23,7 @@ ctk.set_default_color_theme("dark-blue")
 
 # GUI 앱 생성
 app = ctk.CTk()
-app.title("AutoBitTrade")
+app.title("bithumbSplit")
 app.geometry("600x1000")
 
 # 전역 변수
