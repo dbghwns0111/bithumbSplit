@@ -10,8 +10,22 @@ from urllib.parse import urlencode
 import requests
 from requests.exceptions import RequestException
 import jwt
-from utils.telegram import send_telegram_message
 from dotenv import load_dotenv
+import sys
+from pathlib import Path
+
+# 프로젝트 루트를 sys.path에 추가
+if getattr(sys, 'frozen', False):
+    # PyInstaller로 패키징된 경우
+    base_path = Path(sys.executable).parent
+else:
+    # 개발 환경
+    base_path = Path(__file__).parent.parent
+
+if str(base_path) not in sys.path:
+    sys.path.insert(0, str(base_path))
+
+from utils.telegram import send_telegram_message
 
 # .env 파일 로드
 load_dotenv()

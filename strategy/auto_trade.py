@@ -8,6 +8,17 @@ from datetime import datetime
 import json
 import os
 import sys
+from pathlib import Path
+
+# 프로젝트 루트를 sys.path에 추가
+if getattr(sys, 'frozen', False):
+    base_path = Path(sys.executable).parent
+else:
+    base_path = Path(__file__).parent.parent
+
+if str(base_path) not in sys.path:
+    sys.path.insert(0, str(base_path))
+
 from api.api import place_order, get_order_detail, cancel_order_by_uuid
 from config.tick_table import TICK_SIZE
 from utils.telegram import send_telegram_message, MSG_AUTO_TRADE_START, MSG_BUY_ORDER, MSG_SELL_ORDER, MSG_BUY_FILLED, MSG_SELL_FILLED

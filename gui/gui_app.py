@@ -9,8 +9,16 @@ import time
 from datetime import datetime
 from tkinter import messagebox
 import queue
+from pathlib import Path
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 프로젝트 루트를 sys.path에 추가
+if getattr(sys, 'frozen', False):
+    base_path = Path(sys.executable).parent
+else:
+    base_path = Path(__file__).parent.parent
+
+if str(base_path) not in sys.path:
+    sys.path.insert(0, str(base_path))
 
 from strategy.auto_trade import run_auto_trade
 from utils.telegram import send_telegram_message

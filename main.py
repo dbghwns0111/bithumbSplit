@@ -1,6 +1,14 @@
 # bithumbSplit/main.py
 # 무한 반복형 자동매매 전략 실행 (auto_trade.py 기반)
 
+import sys
+from pathlib import Path
+
+# 프로젝트 루트를 sys.path에 추가
+base_path = Path(__file__).parent
+if str(base_path) not in sys.path:
+    sys.path.insert(0, str(base_path))
+
 from strategy.auto_trade import run_auto_trade
 from utils.telegram import send_telegram_message
 
