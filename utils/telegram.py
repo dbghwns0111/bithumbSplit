@@ -44,15 +44,21 @@ MSG_AUTO_TRADE_START = (
 )
 
 MSG_BUY_ORDER = (
-    "🛒 <b>{market}</b> | <b>{level}차 매수 주문 등록</b>\n"
-    "📉 매수가: {buy_price:,}원\n"
-    "📦 수량: {volume:.8f}"
+    "🛒 <b>[매수 주문 등록]</b>\n"
+    "📍 종목: <b>{market}</b>\n"
+    "🔢 차수: <b>{level}차</b>\n"
+    "💰 주문가: {buy_price:,}원\n"
+    "📦 주문수량: {volume:.8f}\n"
+    "⏰ 주문시간: {order_time}"
 )
 
 MSG_SELL_ORDER = (
-    "📤 <b>{market}</b> | <b>{level}차 매도 주문 등록</b>\n"
-    "📈 매도가: {sell_price:,}원\n"
-    "📦 수량: {volume:.8f}"
+    "📤 <b>[매도 주문 등록]</b>\n"
+    "📍 종목: <b>{market}</b>\n"
+    "🔢 차수: <b>{level}차</b>\n"
+    "💰 주문가: {sell_price:,}원\n"
+    "📦 주문수량: {volume:.8f}\n"
+    "⏰ 주문시간: {order_time}"
 )
 
 MSG_BUY_FILLED = (
