@@ -125,30 +125,34 @@ def calculate_price(base_price, gap_value, mode, direction):
 
 # 주문 등록 함수: 매수 또는 매도 주문을 API를 통해 실행
 def place_buy(level, market):
+    """매수 주문 등록 후 성공 여부 반환"""
     res = place_order(market, 'bid', level.volume, level.buy_price, 'limit')
     uuid = res.get('uuid') or res.get('data', {}).get('uuid')
     if uuid:
         level.buy_uuid = uuid
         print(f"🛒 [{level.level}차] 매수 주문 등록: {level.buy_price}원 / {level.volume}개")
         send_telegram_message(MSG_BUY_ORDER.format(market=market, level=level.level, buy_price=level.buy_price, volume=level.volume))
-    else:
-        # [수정] 오류 응답 전체를 보기 쉽게 출력
-        error_msg = json.dumps(res, indent=4, ensure_ascii=False)
-        print(f"❌ 매수 주문 실패 [{level.level}차]:\n{error_msg}")
-        # print(f"❌ 매수 주문 실패 [{level.level}차]: {res}") # 기존 코드
+        return True
+
+    error_msg = json.dumps(res, indent=4, ensure_ascii=False)
+    print(f"❌ 매수 주문 실패 [{level.level}차]:\n{error_msg}")
+    send_telegram_message(f"❌ [{level.level}차] 매수 주문 실패\n📍코인: {market}\n사유: {res}")
+    return False
 
 def place_sell(level, market):
+    """매도 주문 등록 후 성공 여부 반환"""
     res = place_order(market, 'ask', level.volume, level.sell_price, 'limit')
     uuid = res.get('uuid') or res.get('data', {}).get('uuid')
     if uuid:
         level.sell_uuid = uuid
         print(f"📤 [{level.level}차] 매도 주문 등록: {level.sell_price}원 / {level.volume}개")
         send_telegram_message(MSG_SELL_ORDER.format(market=market, level=level.level, sell_price=level.sell_price, volume=level.volume))
-    else:
-        # [수정] 오류 응답 전체를 보기 쉽게 출력
-        error_msg = json.dumps(res, indent=4, ensure_ascii=False)
-        print(f"❌ 매도 주문 실패 [{level.level}차]:\n{error_msg}")
-        # print(f"❌ 매도 주문 실패 [{level.level}차]: {res}") # 기존 코드
+        return True
+
+    error_msg = json.dumps(res, indent=4, ensure_ascii=False)
+    print(f"❌ 매도 주문 실패 [{level.level}차]:\n{error_msg}")
+    send_telegram_message(f"❌ [{level.level}차] 매도 주문 실패\n📍코인: {market}\n사유: {res}")
+    return False
 
 # 그리드 레벨 클래스: 각 차수의 매수/매도 가격과 수량을 관리
 # 레벨(level), 매수 가격(buy_price), 매도 가격(sell_price),
@@ -266,25 +270,40 @@ def run_auto_trade(start_price, krw_amount, max_levels,
         
         # resume_level 차수부터는 미체결 상태로 유지
         # resume_level 차수 매수 주문 등록
+        buy_ok = False
         if resume_level <= len(levels):
             current_level = levels[resume_level - 1]  # resume_level차 (인덱스는 -1)
-            place_buy(current_level, market)
-        
+            buy_ok = place_buy(current_level, market)
+
         # resume_level-1 차수 매도 주문 등록 (있다면)
+        sell_ok = False
         if resume_level > 1:
             prev_level = levels[resume_level - 2]  # resume_level-1차
             prev_level.buy_filled = True  # 이전 차수는 매수 체결된 상태
             prev_level.sell_filled = False
-            place_sell(prev_level, market)
-        
+            sell_ok = place_sell(prev_level, market)
+
+        # 주문 실패 시 사용자 알림 후 종료
+        if not buy_ok:
+            send_telegram_message(
+                f"❌ [수동 재시작 실패]\n"
+                f"📍코인: {market}\n"
+                f"🔢 재시작 차수: {resume_level}차\n"
+                f"사유: 매수 주문이 등록되지 않았습니다."
+            )
+            return
+
+        # 상태 저장 (주문 uuid 반영)
         persist_state()
-        
-        # 텔레그램 메시지 구성
-        if resume_level > 1:
+
+        # 텔레그램 메시지 구성 (성공한 주문만 포함)
+        if resume_level > 1 and sell_ok:
             order_info = f"⚠️ {resume_level}차 매수 + {resume_level - 1}차 매도 주문 등록됨"
+        elif resume_level > 1 and not sell_ok:
+            order_info = f"⚠️ {resume_level}차 매수 등록, {resume_level - 1}차 매도 등록 실패"
         else:
             order_info = f"⚠️ {resume_level}차 매수 주문 등록됨"
-        
+
         send_telegram_message(
             f"🔄 [수동 재시작]\n"
             f"📍코인: {market}\n"
