@@ -56,15 +56,21 @@ MSG_SELL_ORDER = (
 )
 
 MSG_BUY_FILLED = (
-    "✅ <b>{market}</b> | <b>{level}차 매수 체결</b>\n"
-    "📉 매수가: {buy_price:,}원\n"
-    "📦 수량: {volume:.8f}"
+    "✅ <b>[매수 체결]</b>\n"
+    "📍 종목: <b>{market}</b>\n"
+    "🔢 차수: <b>{level}차</b>\n"
+    "💰 체결가: {buy_price:,}원\n"
+    "📦 체결수량: {volume:.8f}\n"
+    "⏰ 체결시간: {filled_time}"
 )
 
 MSG_SELL_FILLED = (
-    "☑️ <b>{market}</b> | <b>{level}차 매도 체결</b>\n"
-    "📈 매도가: {sell_price:,}원\n"
-    "📦 수량: {volume:.8f}\n"
-    "📊 수익: <b>{profit:,.0f}원</b>\n"
-    "💼 누적 수익: <b>{realized_profit:,.0f}원</b>"
+    "☑️ <b>[매도 체결]</b>\n"
+    "📍 종목: <b>{market}</b>\n"
+    "🔢 차수: <b>{level}차</b>\n"
+    "💰 체결가: {sell_price:,}원\n"
+    "📦 체결수량: {volume:.8f}\n"
+    "💵 실현수익: <b>{profit:,.0f}원</b>\n"
+    "💼 누적수익: <b>{realized_profit:,.0f}원</b>\n"
+    "⏰ 체결시간: {filled_time}"
 )
