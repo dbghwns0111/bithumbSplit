@@ -32,7 +32,21 @@ ctk.set_default_color_theme("dark-blue")
 # GUI 앱 생성
 app = ctk.CTk()
 app.title("bithumbSplit")
-app.geometry("600x1000")
+
+# 화면 크기 감지 및 창 크기 동적 설정
+screen_width = app.winfo_screenwidth()
+screen_height = app.winfo_screenheight()
+
+# 화면 크기의 85%로 설정 (최소 600x700, 최대 700x1000)
+window_width = min(max(int(screen_width * 0.4), 600), 700)
+window_height = min(max(int(screen_height * 0.85), 700), 1000)
+
+# 창을 화면 중앙에 배치
+x = (screen_width - window_width) // 2
+y = (screen_height - window_height) // 2
+
+app.geometry(f"{window_width}x{window_height}+{x}+{y}")
+app.minsize(600, 700)  # 최소 크기 설정
 
 # 전역 변수
 stop_flag = False
@@ -356,10 +370,18 @@ def periodic_update():
         print(f"[ERROR] periodic_update: {e}")
     finally:
         app.after(100, periodic_update)  # 100ms마다 실행
+
+# UI 구성 - 스크롤 가능한 메인 프레임
+main_scrollable = ctk.CTkScrollableFrame(app)
+main_scrollable.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+main_scrollable.grid_columnconfigure(0, weight=1)
+
+# 앱 그리드 설정
+app.grid_rowconfigure(0, weight=1)
+app.grid_columnconfigure(0, weight=1)
         
-# UI 구성
 ### 실시간 시세 정보 표시
-price_frame = ctk.CTkFrame(app)
+price_frame = ctk.CTkFrame(main_scrollable)
 price_frame.grid(row=0, column=0, padx=10, pady=(10, 0), sticky="ew")
 price_frame.columnconfigure(0, weight=1)  # 수평 확장 설정
 
@@ -371,7 +393,7 @@ for coin in ["BTC", "USDT", "XRP"]:
     price_labels[coin].pack(anchor="w", padx=10)
 
 ### 입력 UI 프레임
-input_frame = ctk.CTkFrame(app)
+input_frame = ctk.CTkFrame(main_scrollable)
 input_frame.grid(row=1, column=0, padx=10, pady=10, sticky="ew")
 input_frame.columnconfigure(0, weight=1)
 
@@ -458,7 +480,7 @@ btn_start.grid(row=0, column=0, pady=10, sticky="ew", padx=(10, 5))
 btn_stop.grid(row=0, column=1, pady=10, sticky="ew", padx=(5, 10))
 
 ### 2. 전략 현황 카드
-summary_frame = ctk.CTkFrame(app)
+summary_frame = ctk.CTkFrame(main_scrollable)
 summary_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
 summary_frame.columnconfigure(0, weight=1)
 
@@ -498,7 +520,7 @@ summary_labels["profit"] = ctk.CTkLabel(info_frame_profit, text="총 수익: -",
 summary_labels["profit"].pack(side="left", padx=10, pady=8)
 
 ### 3. 현재 차수 상태 카드
-current_order_frame = ctk.CTkFrame(app)
+current_order_frame = ctk.CTkFrame(main_scrollable)
 current_order_frame.grid(row=3, column=0, padx=10, pady=(5, 10), sticky="ew")
 current_order_frame.columnconfigure(0, weight=1)
 
@@ -527,10 +549,6 @@ status_text_label = ctk.CTkLabel(
     font=ctk.CTkFont(size=13),
 )
 status_text_label.grid(row=3, column=0, pady=(0, 10))
-
-# 메인 윈도우 레이아웃 확장 설정
-app.grid_rowconfigure(3, weight=0)  # 현재 차수 정보는 고정 크기
-app.grid_columnconfigure(0, weight=1)
 
 # 정기 업데이트 시작
 periodic_update()
