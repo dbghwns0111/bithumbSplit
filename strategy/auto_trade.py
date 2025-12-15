@@ -31,21 +31,24 @@ def _base_dir():
     return os.path.dirname(os.path.dirname(__file__))
 
 
-def _state_path():
+def _state_path(market='KRW-BTC'):
     try:
-        return os.path.join(_base_dir(), 'logs', 'autotrade_state.json')
+        # 파일명에 코인 정보 포함 (예: autotrade_state_KRW_BTC.json)
+        filename = f'autotrade_state_{market.replace("-", "_")}.json'
+        return os.path.join(_base_dir(), 'logs', filename)
     except Exception as e:
         print(f"⚠️ 상태 경로 계산 실패, 현재 작업 경로로 대체: {e}")
-        return os.path.join(os.getcwd(), 'logs', 'autotrade_state.json')
+        filename = f'autotrade_state_{market.replace("-", "_")}.json'
+        return os.path.join(os.getcwd(), 'logs', filename)
 
 
-def _ensure_state_dir():
-    os.makedirs(os.path.dirname(_state_path()), exist_ok=True)
+def _ensure_state_dir(market='KRW-BTC'):
+    os.makedirs(os.path.dirname(_state_path(market)), exist_ok=True)
 
 
-def _load_state():
+def _load_state(market='KRW-BTC'):
     try:
-        with open(_state_path(), 'r', encoding='utf-8') as f:
+        with open(_state_path(market), 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
         return None
@@ -54,12 +57,12 @@ def _load_state():
         return None
 
 
-def _save_state(state: dict):
+def _save_state(state: dict, market='KRW-BTC'):
     try:
-        _ensure_state_dir()
-        with open(_state_path(), 'w', encoding='utf-8') as f:
+        _ensure_state_dir(market)
+        with open(_state_path(market), 'w', encoding='utf-8') as f:
             json.dump(state, f, ensure_ascii=False, indent=2)
-        print(f"💾 상태 저장: {_state_path()}")
+        print(f"💾 상태 저장: {_state_path(market)}")
     except Exception as e:
         print(f"⚠️ 상태 파일 저장 실패: {e}")
 
@@ -185,7 +188,7 @@ def run_auto_trade(start_price, krw_amount, max_levels,
     manual_resume = resume_level > 0
     
     # 기존 상태 복원 시도 (resume_level=0일 때만)
-    loaded_state = _load_state()
+    loaded_state = _load_state(market)
     resume_state = None
     if not manual_resume and loaded_state and _params_match(loaded_state, market, start_price, krw_amount, max_levels, buy_gap, buy_mode, sell_gap, sell_mode):
         resume_state = loaded_state
@@ -247,7 +250,7 @@ def run_auto_trade(start_price, krw_amount, max_levels,
             "trade_history": trade_history,  # 체결 이력 추가
             "last_updated": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
-        _save_state(snapshot)
+        _save_state(snapshot, market)
 
     # 수동 재시작 처리 (resume_level > 0)
     if manual_resume:
