@@ -32,6 +32,11 @@ load_dotenv()
 accessKey = os.getenv("BITHUMB_API_KEY")
 secretKey = os.getenv("BITHUMB_API_SECRET")
 
+# 서버 시간 보정값 (ms)
+_server_time_offset_ms = 0
+_last_time_sync = 0.0
+_TIME_SYNC_INTERVAL = 300  # 5분 간격으로만 동기화
+
 def _alert(msg: str):
     try:
         send_telegram_message(msg)
@@ -40,12 +45,83 @@ def _alert(msg: str):
         pass
 apiUrl = 'https://api.bithumb.com'
 
+
+def _sync_server_time(force: bool = False):
+    """공개 시세 API를 이용해 서버 시간과의 차이를 보정한다."""
+    global _server_time_offset_ms, _last_time_sync
+
+    if not force and (time.time() - _last_time_sync) < _TIME_SYNC_INTERVAL:
+        return
+
+    try:
+        resp = requests.get(f"{apiUrl}/public/ticker/BTC_KRW", timeout=3)
+        data = resp.json()
+        server_ts = int(data.get('data', {}).get('date') or data.get('date') or 0)
+        if server_ts:
+            local_ts = int(time.time() * 1000)
+            _server_time_offset_ms = server_ts - local_ts
+            _last_time_sync = time.time()
+    except Exception:
+        # 서버 시간 확인 실패 시 보정 없이 진행
+        pass
+
+
+def _now_ms():
+    _sync_server_time()
+    return round(time.time() * 1000 + _server_time_offset_ms)
+
+
+def _is_expired_jwt(resp_json):
+    if isinstance(resp_json, dict):
+        err = resp_json.get('error')
+        if isinstance(err, dict) and err.get('name') == 'expired_jwt':
+            return True
+    return False
+
+
+def _signed_request(method, path, query=None, body=None, retries=3, delay=1, backoff=2, timeout=5, alert_label=None):
+    """JWT 서명 요청 + 만료 시 재시도 공통 헬퍼"""
+    cur_delay = delay
+    url = f"{apiUrl}{path}"
+
+    for attempt in range(1, retries + 1):
+        headers = _make_token(body if body else query)
+        if body is not None:
+            headers['Content-Type'] = 'application/json'
+
+        try:
+            resp = requests.request(
+                method,
+                url,
+                params=query,
+                data=json.dumps(body) if body is not None else None,
+                headers=headers,
+                timeout=timeout,
+            )
+            data = resp.json()
+
+            if _is_expired_jwt(data) and attempt < retries:
+                # 서버 시간 보정 후 재시도
+                _sync_server_time(force=True)
+                time.sleep(cur_delay)
+                cur_delay *= backoff
+                continue
+
+            return data
+        except RequestException as e:
+            if attempt == retries:
+                if alert_label:
+                    _alert(f"🚨 {alert_label} 실패({attempt}/{retries}): {e}")
+                return {"status": "9999", "message": str(e)}
+            time.sleep(cur_delay)
+            cur_delay *= backoff
+
 # 공통: JWT 토큰 생성 함수
 def _make_token(query: dict = None):
     payload = {
         'access_key': accessKey,
         'nonce': str(uuid.uuid4()),
-        'timestamp': round(time.time() * 1000),
+        'timestamp': _now_ms(),
     }
 
     if query:
@@ -63,16 +139,12 @@ def _make_token(query: dict = None):
 
 # 자산 조회
 def get_balance():
-    headers = _make_token()
-    resp = requests.get(f"{apiUrl}/v1/accounts", headers=headers)
-    return resp.json()
+    return _signed_request("GET", "/v1/accounts", alert_label="잔고 조회")
 
 # 주문 가능 정보 조회
 def get_order_chance(market='KRW-BTC'):
     query = {"market": market}
-    headers = _make_token(query)
-    resp = requests.get(f"{apiUrl}/v1/orders/chance", params=query, headers=headers)
-    return resp.json()
+    return _signed_request("GET", "/v1/orders/chance", query=query, alert_label="주문 가능 조회")
 
 # 주문 실행 함수 (지정가 또는 시장가)
 def place_order(market, side, volume, price, ord_type='limit', retries=3, delay=1, backoff=2):
@@ -83,54 +155,42 @@ def place_order(market, side, volume, price, ord_type='limit', retries=3, delay=
         "price": str(price),
         "ord_type": ord_type
     }
-    headers = _make_token(body)
-    headers['Content-Type'] = 'application/json'
-
-    cur_delay = delay
-    for attempt in range(1, retries + 1):
-        try:
-            resp = requests.post(f"{apiUrl}/v1/orders", headers=headers, data=json.dumps(body), timeout=5)
-            return resp.json()
-        except RequestException as e:
-            if attempt == retries:
-                _alert(f"🚨 주문 요청 실패({attempt}/{retries}) {market} {side} {price}: {e}")
-                return {"status": "9999", "message": str(e)}
-            time.sleep(cur_delay)
-            cur_delay *= backoff
+    return _signed_request(
+        "POST",
+        "/v1/orders",
+        body=body,
+        retries=retries,
+        delay=delay,
+        backoff=backoff,
+        alert_label=f"주문 요청 {market} {side} {price}"
+    )
 
 # 주문 취소 함수 (UUID 기반)
 def cancel_order(order_uuid, retries=3, delay=1, backoff=2):
     param = {'uuid': order_uuid}
-    headers = _make_token(param)
-    cur_delay = delay
-    for attempt in range(1, retries + 1):
-        try:
-            response = requests.delete(f"{apiUrl}/v1/order", params=param, headers=headers, timeout=5)
-            return response.json()
-        except RequestException as e:
-            if attempt == retries:
-                _alert(f"🚨 주문 취소 실패({attempt}/{retries}) {order_uuid}: {e}")
-                return {"status": "9999", "message": str(e)}
-            time.sleep(cur_delay)
-            cur_delay *= backoff
+    return _signed_request(
+        "DELETE",
+        "/v1/order",
+        query=param,
+        retries=retries,
+        delay=delay,
+        backoff=backoff,
+        alert_label=f"주문 취소 {order_uuid}"
+    )
 
 # 개별 주문 조회
 def get_order_detail(order_uuid, retries=3, delay=1, backoff=2):
     query = {"uuid": order_uuid}
-    headers = _make_token(query)
-    cur_delay = delay
-
-    for attempt in range(1, retries + 1):
-        try:
-            resp = requests.get(f"{apiUrl}/v1/order", params=query, headers=headers, timeout=5)
-            return resp.json()
-        except RequestException as e:
-            print(f"[{attempt}/{retries}] 주문 조회 실패: {e}")
-            if attempt == retries:
-                _alert(f"🚨 주문 조회 실패({attempt}/{retries}) {order_uuid}: {e}")
-                return {"status": "9999", "message": str(e)}
-            time.sleep(cur_delay)
-            cur_delay *= backoff
+    result = _signed_request(
+        "GET",
+        "/v1/order",
+        query=query,
+        retries=retries,
+        delay=delay,
+        backoff=backoff,
+        alert_label=f"주문 조회 {order_uuid}"
+    )
+    return result
 
 # 주문 리스트 조회
 
@@ -145,9 +205,7 @@ def get_order_list(market='KRW-BTC', limit=100, page=1, order_by='desc', uuids=N
         for i, u in enumerate(uuids):
             query[f"uuids[{i}]"] = u
 
-    headers = _make_token(query)
-    resp = requests.get(f"{apiUrl}/v1/orders", params=query, headers=headers)
-    return resp.json()
+    return _signed_request("GET", "/v1/orders", query=query, alert_label="주문 리스트 조회")
 
 # 전체 주문 취소
 def cancel_all_orders(market):
