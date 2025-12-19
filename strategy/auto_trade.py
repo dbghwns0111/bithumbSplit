@@ -134,7 +134,16 @@ def place_buy(level, market):
     if uuid:
         level.buy_uuid = uuid
         print(f"🛒 [{level.level}차] 매수 주문 등록: {level.buy_price}원 / {level.volume}개")
-        send_telegram_message(MSG_BUY_ORDER.format(market=market, level=level.level, buy_price=level.buy_price, volume=level.volume))
+        order_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        send_telegram_message(
+            MSG_BUY_ORDER.format(
+                market=market,
+                level=level.level,
+                buy_price=level.buy_price,
+                volume=level.volume,
+                order_time=order_time,
+            )
+        )
         return True
 
     error_msg = json.dumps(res, indent=4, ensure_ascii=False)
@@ -149,7 +158,16 @@ def place_sell(level, market):
     if uuid:
         level.sell_uuid = uuid
         print(f"📤 [{level.level}차] 매도 주문 등록: {level.sell_price}원 / {level.volume}개")
-        send_telegram_message(MSG_SELL_ORDER.format(market=market, level=level.level, sell_price=level.sell_price, volume=level.volume))
+        order_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        send_telegram_message(
+            MSG_SELL_ORDER.format(
+                market=market,
+                level=level.level,
+                sell_price=level.sell_price,
+                volume=level.volume,
+                order_time=order_time,
+            )
+        )
         return True
 
     error_msg = json.dumps(res, indent=4, ensure_ascii=False)
