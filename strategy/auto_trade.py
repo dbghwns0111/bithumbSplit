@@ -636,22 +636,46 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                 print("⚠️ [헬스체크] 주문 목록 조회 실패")
                 return
 
-            # 2. 현재 진행 상태 파악 (가장 최근 매수 체결 차수)
-            current_level = None
-            for level in levels:
-                if level.buy_filled and not level.sell_filled:
-                    current_level = level
-            
-            # 타깃 주문 결정: 기본적으로 N차 매도 + N+1차 매수 (초기/최대차수 예외)
-            sell_target = None
-            buy_target = None
-            if current_level:
-                sell_target = current_level
-                if current_level.level < len(levels):
-                    buy_target = levels[current_level.level]
-            else:
-                # 아직 매수가 체결되지 않았거나 매도 후 재매수만 남은 상태
-                buy_target = levels[0]
+            # 2. 진행 상태 파악: 열린 주문/최근 체결 기반으로 타깃 결정
+            def infer_targets():
+                sell_target_local = None
+                buy_target_local = None
+
+                # 2-1) 열린 매도 주문(ask) 중 가장 높은 차수를 우선 타깃
+                for lvl in levels:
+                    if lvl.sell_uuid and lvl.sell_uuid in active_orders:
+                        if not sell_target_local or lvl.level > sell_target_local.level:
+                            sell_target_local = lvl
+
+                # 2-2) 열린 매수 주문(bid) 중 가장 높은 차수를 보조 타깃
+                for lvl in levels:
+                    if lvl.buy_uuid and lvl.buy_uuid in active_orders:
+                        if not buy_target_local or lvl.level > buy_target_local.level:
+                            buy_target_local = lvl
+
+                # 2-3) 매도 타깃이 있고 매수 타깃이 없으면 N차 매도, N+1차 매수 구조 보장
+                if sell_target_local and not buy_target_local:
+                    if sell_target_local.level < len(levels):
+                        buy_target_local = levels[sell_target_local.level]
+
+                # 2-4) 열린 주문이 없으면 최근 체결 이력으로 추론 (마지막 체결 차수의 다음 차수 매수)
+                if not sell_target_local and not buy_target_local:
+                    last_level = None
+                    if trade_history:
+                        last_level = max(tr['level'] for tr in trade_history if 'level' in tr)
+                    if last_level:
+                        if last_level < len(levels):
+                            buy_target_local = levels[last_level]
+                    else:
+                        buy_target_local = levels[0]
+
+                # 2-5) 모든 추론 실패 시 기본 1차 매수
+                if not sell_target_local and not buy_target_local:
+                    buy_target_local = levels[0]
+
+                return sell_target_local, buy_target_local
+
+            sell_target, buy_target = infer_targets()
 
             # 활성 주문이 타깃과 일치하는지 확인
             desired_orders = []
@@ -741,7 +765,7 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                         # 체결 시간 가져오기
                         filled_time = data.get('created_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                         if 'T' in str(filled_time):
-                            filled_time = filled_time.replace('T', ' ').split('.')[0]
+                            filled_time = filled_time.replace('T', ' ').split('.')[0].split('+')[0]
 
                         print(f"✅ [{level.level}차] 매수 체결 완료: {level.buy_price}원 / {filled_time}")
                         send_telegram_message(MSG_BUY_FILLED.format(
@@ -805,7 +829,7 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                         # 체결 시간 가져오기
                         filled_time = data.get('created_at', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                         if 'T' in str(filled_time):
-                            filled_time = filled_time.replace('T', ' ').split('.')[0]
+                            filled_time = filled_time.replace('T', ' ').split('.')[0].split('+')[0]
 
                         # 체결 이력 저장 (복구용)
                         trade_history.append({
