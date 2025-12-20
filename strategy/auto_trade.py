@@ -251,6 +251,66 @@ def run_auto_trade(start_price, krw_amount, max_levels,
 
     # 체결 이력 저장용 (realized_profit 복구용)
     trade_history = resume_state.get("trade_history", []) if resume_state else []
+
+    def build_active_orders():
+        """현재 미체결 주문을 uuid 중심으로 매핑해 중복 주문을 방지한다."""
+        try:
+            from api.api import get_order_list
+            order_list = get_order_list(market=market, limit=100)
+        except Exception as e:  # 네트워크 오류 등은 빈 결과로 처리
+            print(f"⚠️ 활성 주문 조회 실패: {e}")
+            return {}, None
+
+        active_orders = {}
+        if isinstance(order_list, list):
+            for order in order_list:
+                uuid = order.get('uuid') or order.get('order_id')
+                if not uuid:
+                    continue
+                active_orders[uuid] = {
+                    'side': order.get('side'),
+                    'price': float(order.get('price', 0) or 0),
+                    'volume': float(order.get('volume', 0) or 0),
+                }
+        return active_orders, order_list if isinstance(order_list, list) else None
+
+    def find_matching_order(active_orders, side, target_price, target_volume):
+        """가격·수량이 유사한 주문을 찾아 uuid를 재연결한다."""
+        price_tol = max(tick, target_price * 0.001)  # 0.1% 또는 한 틱
+        volume_tol = max(target_volume * 0.02, 1e-10)  # 2% 허용치
+        for uuid, info in active_orders.items():
+            if info['side'] != side:
+                continue
+            if abs(info['price'] - target_price) > price_tol:
+                continue
+            if abs(info['volume'] - target_volume) > volume_tol:
+                continue
+            return uuid
+        return None
+
+    def reattach_missing_orders():
+        """상태에 uuid가 없지만 실제 주문이 남아있다면 다시 연결한다."""
+        active_orders, order_list = build_active_orders()
+        if not active_orders:
+            return set(), order_list
+
+        attached_levels = set()
+        for level in levels:
+            if not level.buy_filled and not level.buy_uuid:
+                matched = find_matching_order(active_orders, 'bid', level.buy_price, level.volume)
+                if matched:
+                    level.buy_uuid = matched
+                    attached_levels.add(f"{level.level}차 매수")
+            if not level.sell_filled and not level.sell_uuid:
+                matched = find_matching_order(active_orders, 'ask', level.sell_price, level.volume)
+                if matched:
+                    level.sell_uuid = matched
+                    attached_levels.add(f"{level.level}차 매도")
+
+        if attached_levels:
+            print(f"🔗 누락 uuid 복구: {', '.join(sorted(attached_levels))}")
+            persist_state()
+        return attached_levels, order_list
     
     def persist_state():
         snapshot = {
@@ -269,6 +329,53 @@ def run_auto_trade(start_price, krw_amount, max_levels,
             "last_updated": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
         _save_state(snapshot, market)
+
+    def place_pair_orders(sell_target=None, buy_target=None):
+        """고변동성에서도 주문쌍이 반드시 만들어지도록 보호 로직."""
+        if not sell_target and not buy_target:
+            return
+
+        def _register_pair():
+            if sell_target:
+                place_sell(sell_target, market)
+                time.sleep(0.1)  # 매수보다 먼저 매도를 올려 자산 보유분을 시장에 노출
+            if buy_target:
+                place_buy(buy_target, market)
+
+        # 1차 시도
+        _register_pair()
+
+        # 검증: 실제 주문이 올라갔는지 확인, 부족하면 한 번 더 시도
+        active_orders, order_list = build_active_orders()
+        if order_list is None:
+            return
+
+        desired = []
+        if sell_target:
+            desired.append(('ask', sell_target.sell_price, sell_target.volume, 'sell'))
+        if buy_target:
+            desired.append(('bid', buy_target.buy_price, buy_target.volume, 'buy'))
+
+        missing = []
+        for side, price, volume, label in desired:
+            matched = find_matching_order(active_orders, side, price, volume)
+            if not matched:
+                missing.append(label)
+            else:
+                if side == 'ask':
+                    sell_target.sell_uuid = matched
+                else:
+                    buy_target.buy_uuid = matched
+
+        if missing:
+            print(f"⚠️ 주문쌍 일부 미등록 감지 → 재시도: {', '.join(missing)}")
+            try:
+                from api.api import cancel_all_orders
+                cancel_all_orders(market)
+            except Exception as e:
+                print(f"⚠️ 주문쌍 재시도 전 전체 취소 실패: {e}")
+            _register_pair()
+            persist_state()
 
     # 수동 재시작 처리 (resume_level > 0)
     if manual_resume:
@@ -430,11 +537,14 @@ def run_auto_trade(start_price, krw_amount, max_levels,
         except Exception as e:
             print(f"⚠️ 잔고 기반 복구 중 오류: {e}")
         
+        # 1-2단계: 주문 uuid 누락분 재연결 (중복 주문 방지)
+        attached_levels, cached_order_list = reattach_missing_orders()
+
         # 2단계: 고아 주문 감지 (코드가 인식하지 못하는 주문)
         try:
             from api.api import get_order_list
             print("🔍 고아 주문 감지 중...")
-            order_list = get_order_list(market=market, limit=100)
+            order_list = cached_order_list or get_order_list(market=market, limit=100)
             
             if isinstance(order_list, list):
                 tracked_uuids = set()
@@ -446,14 +556,14 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                 
                 orphan_orders = []
                 for order in order_list:
-                    order_uuid = order.get('uuid')
+                    order_uuid = order.get('uuid') or order.get('order_id')
                     if order_uuid and order_uuid not in tracked_uuids:
                         orphan_orders.append(order)
                 
                 if orphan_orders:
                     print(f"⚠️ {len(orphan_orders)}개의 고아 주문 발견 - 취소합니다:")
                     for order in orphan_orders:
-                        order_uuid = order.get('uuid')
+                        order_uuid = order.get('uuid') or order.get('order_id')
                         side = order.get('side')
                         price = float(order.get('price', 0))
                         volume = float(order.get('volume', 0))
@@ -518,75 +628,95 @@ def run_auto_trade(start_price, krw_amount, max_levels,
     def perform_health_check():
         """자동매매 상태 검증 및 자동 복구"""
         try:
-            from api.api import get_order_list
             print("🏥 [헬스체크] 자동매매 상태 검증 중...")
-            
-            # 1. 현재 주문 목록 조회
-            order_list = get_order_list(market=market, limit=100)
-            if not isinstance(order_list, list):
+
+            # 1. 현재 주문 목록 조회 + uuid 매핑
+            active_orders, order_list = build_active_orders()
+            if order_list is None:
                 print("⚠️ [헬스체크] 주문 목록 조회 실패")
                 return
-            
-            # 2. 실제 주문 UUID 수집
-            active_orders = {}
-            for order in order_list:
-                order_uuid = order.get('uuid')
-                side = order.get('side')  # 'bid' or 'ask'
-                price = float(order.get('price', 0))
-                if order_uuid:
-                    active_orders[order_uuid] = {'side': side, 'price': price}
-            
-            # 3. 가장 최근 매수 체결 차수 찾기
-            last_filled_buy_level = None
+
+            # 2. 현재 진행 상태 파악 (가장 최근 매수 체결 차수)
+            current_level = None
             for level in levels:
-                if level.buy_filled:
-                    last_filled_buy_level = level
+                if level.buy_filled and not level.sell_filled:
+                    current_level = level
             
-            if not last_filled_buy_level:
-                # 아직 아무것도 체결 안 됨 - 1차 매수 주문 확인
-                if not levels[0].buy_uuid or levels[0].buy_uuid not in active_orders:
-                    print("🔧 [헬스체크] 1차 매수 주문 없음 - 재등록")
-                    place_buy(levels[0], market)
-                    persist_state()
-                    send_telegram_message(f"🔧 [자동복구]\n📍코인: {market}\n🔄 조치: 1차 매수 주문 재등록")
-                return
-            
-            # 4. 현재 진행 상황 검증
-            current_level = last_filled_buy_level
-            next_level_idx = current_level.level
-            
+            # 타깃 주문 결정: 기본적으로 N차 매도 + N+1차 매수 (초기/최대차수 예외)
+            sell_target = None
+            buy_target = None
+            if current_level:
+                sell_target = current_level
+                if current_level.level < len(levels):
+                    buy_target = levels[current_level.level]
+            else:
+                # 아직 매수가 체결되지 않았거나 매도 후 재매수만 남은 상태
+                buy_target = levels[0]
+
+            # 활성 주문이 타깃과 일치하는지 확인
+            desired_orders = []
+            if sell_target:
+                desired_orders.append(('ask', sell_target.sell_price, sell_target.volume, sell_target))
+            if buy_target:
+                desired_orders.append(('bid', buy_target.buy_price, buy_target.volume, buy_target))
+
+            # 활성 주문과 매칭 시도 (유사 가격/수량으로 연결 후 여분/누락 판단)
+            remaining_active = set(active_orders.keys())
             issues_found = []
-            
-            # 4-1. 현재 차수 매도 주문 확인 (체결되지 않았다면 주문이 있어야 함)
-            if not current_level.sell_filled:
-                if not current_level.sell_uuid or current_level.sell_uuid not in active_orders:
-                    print(f"🔧 [헬스체크] {current_level.level}차 매도 주문 없음 - 재등록")
-                    place_sell(current_level, market)
+
+            for side, price, volume, lvl in desired_orders:
+                expected_uuid = lvl.sell_uuid if side == 'ask' else lvl.buy_uuid
+                if expected_uuid and expected_uuid in active_orders:
+                    remaining_active.discard(expected_uuid)
+                    continue
+
+                matched_uuid = find_matching_order(active_orders, side, price, volume)
+                if matched_uuid:
+                    if side == 'ask':
+                        lvl.sell_uuid = matched_uuid
+                    else:
+                        lvl.buy_uuid = matched_uuid
+                    remaining_active.discard(matched_uuid)
                     persist_state()
-                    issues_found.append(f"{current_level.level}차 매도")
-            
-            # 4-2. 다음 차수 매수 주문 확인
-            if next_level_idx < len(levels):
-                next_level = levels[next_level_idx]
-                if not next_level.buy_filled:
-                    if not next_level.buy_uuid or next_level.buy_uuid not in active_orders:
-                        print(f"🔧 [헬스체크] {next_level.level}차 매수 주문 없음 - 재등록")
-                        place_buy(next_level, market)
-                        persist_state()
-                        issues_found.append(f"{next_level.level}차 매수")
-            
-            # 5. 복구 알림
+                else:
+                    issues_found.append(f"{lvl.level}차 {'매도' if side == 'ask' else '매수'} 주문 없음")
+
+            # 여분 주문 존재 여부
+            extra_orders = list(remaining_active)
+            if extra_orders:
+                issues_found.append(f"불필요 주문 {len(extra_orders)}건")
+
+            # 불일치가 있으면 전체 취소 후 정확한 1쌍(혹은 1개)만 등록
             if issues_found:
+                try:
+                    from api.api import cancel_all_orders
+                    print(f"🚫 [헬스체크] 이상 감지 → 전체 주문 취소 후 재등록: {', '.join(issues_found)}")
+                    cancel_all_orders(market)
+                except Exception as e:
+                    print(f"⚠️ [헬스체크] 전체 취소 실패: {e}")
+
+                # 상태 초기화 (uuid 제거)
+                for lvl in levels:
+                    lvl.buy_uuid = None
+                    lvl.sell_uuid = None
+
+                # 타깃 주문 재등록 (쌍으로 강제 등록)
+                place_pair_orders(sell_target=sell_target, buy_target=buy_target)
+                persist_state()
+
                 send_telegram_message(
                     f"🔧 [자동복구]\n"
                     f"📍코인: {market}\n"
-                    f"🔄 조치: {', '.join(issues_found)} 주문 재등록\n"
-                    f"📊 현재 차수: {current_level.level}차"
+                    f"🔄 조치: 전체 주문 취소 후 재등록\n"
+                    f"📊 등록 상태: "
+                    f"{sell_target.level if sell_target else '-'}차 매도 / "
+                    f"{buy_target.level if buy_target else '-'}차 매수"
                 )
-                print(f"✅ [헬스체크] {len(issues_found)}개 문제 자동 복구 완료")
-            else:
-                print(f"✅ [헬스체크] 정상 작동 중 (현재: {current_level.level}차)")
-            
+                return
+
+            # 불일치 없으면 정상
+            print("✅ [헬스체크] 정상 작동 중")
+
         except Exception as e:
             print(f"⚠️ [헬스체크] 검증 중 오류: {e}")
 
@@ -646,15 +776,11 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                             print(f"🚫 {cancel_count}개 주문 취소 완료")
                         persist_state()
 
-                        # 📤 현재 차수 매도 주문 등록
-                        place_sell(level, market)
-                        persist_state()
-
-                        # 🛒 다음 차수 매수 등록
+                        # 📤/🛒 매도-매수 한 쌍을 안전하게 등록
                         next_idx = level.level
-                        if next_idx < len(levels):
-                            place_buy(levels[next_idx], market)
-                            persist_state()
+                        next_level = levels[next_idx] if next_idx < len(levels) else None
+                        place_pair_orders(sell_target=level, buy_target=next_level)
+                        persist_state()
 
                 # ✅ 매도 체결 확인
                 if level.sell_uuid and not level.sell_filled:
@@ -738,15 +864,11 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                             print(f"🚫 {cancel_count}개 주문 취소 완료")
                         persist_state()
 
-                        # 🛒 현재 차수 매수 등록
-                        place_buy(level, market)
-                        persist_state()
-
-                        # 📤 이전 차수 매도 등록
+                        # 🛒/📤 매수-매도 한 쌍을 안전하게 등록 (현재차 매수, 이전차 매도)
                         prev_idx = level.level - 2
-                        if prev_idx >= 0:
-                            place_sell(levels[prev_idx], market)
-                            persist_state()
+                        prev_level = levels[prev_idx] if prev_idx >= 0 else None
+                        place_pair_orders(sell_target=prev_level, buy_target=level)
+                        persist_state()
 
         except Exception as loop_error:
             print(f"⚠️ 루프 처리 중 오류 발생: {loop_error}")
