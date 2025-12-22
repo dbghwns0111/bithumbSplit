@@ -47,6 +47,8 @@ def main():
     parser.add_argument('--max-levels', type=int, help='최대차수')
     parser.add_argument('--buy-gap', type=float, help='매수 간격')
     parser.add_argument('--sell-gap', type=float, help='매도 간격')
+    parser.add_argument('--buy-mode', choices=['percent', 'price'], help='매수 간격 모드 (% or price)')
+    parser.add_argument('--sell-mode', choices=['percent', 'price'], help='매도 간격 모드 (% or price)')
     parser.add_argument('--resume-level', type=int, default=0, help='재시작 차수 (0=새시작)')
     
     args = parser.parse_args()
@@ -66,6 +68,10 @@ def main():
         config['buy_gap'] = args.buy_gap
     if args.sell_gap:
         config['sell_gap'] = args.sell_gap
+    if args.buy_mode:
+        config['buy_mode'] = args.buy_mode
+    if args.sell_mode:
+        config['sell_mode'] = args.sell_mode
     
     print(f"""
 ╔════════════════════════════════════════════╗

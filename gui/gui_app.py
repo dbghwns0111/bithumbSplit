@@ -277,14 +277,33 @@ def save_markets_config():
                 messagebox.showerror("입력 오류", f"{market_name}: 숫자 필드에 올바른 값을 입력해주세요.")
                 return False
         
-        # markets_config.json 저장
-        config_dir = base_path / 'config'
-        config_dir.mkdir(exist_ok=True)
-        config_file = config_dir / 'markets_config.json'
-        
-        with open(config_file, 'w', encoding='utf-8') as f:
-            json.dump(configs, f, indent=2, ensure_ascii=False)
-        
+        # markets_config.json 저장 (source 실행과 exe 실행 모두 지원)
+        config_dirs = [base_path / 'config']
+        dist_config_dir = base_path / 'dist' / 'config'
+        # dist/config도 함께 기록하여 exe → watchdog 경로 불일치 방지
+        if dist_config_dir != config_dirs[0]:
+            config_dirs.append(dist_config_dir)
+
+        errors = []
+        saved = False
+
+        for cfg_dir in config_dirs:
+            try:
+                cfg_dir.mkdir(parents=True, exist_ok=True)
+                cfg_file = cfg_dir / 'markets_config.json'
+                with open(cfg_file, 'w', encoding='utf-8') as f:
+                    json.dump(configs, f, indent=2, ensure_ascii=False)
+                print(f"💾 설정 저장: {cfg_file}")
+                saved = True
+            except Exception as e:
+                # 한 경로 실패해도 다른 경로 저장을 계속 시도
+                print(f"⚠️ 설정 저장 실패 ({cfg_dir}): {e}")
+                errors.append(e)
+
+        # 모든 경로에서 실패한 경우에만 예외
+        if not saved and errors:
+            raise errors[-1]
+
         return True
     
     except Exception as e:

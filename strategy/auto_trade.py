@@ -277,6 +277,20 @@ def run_auto_trade(start_price, krw_amount, max_levels,
             volume = round(krw_amount / buy_price, 8)
             levels.append(GridLevel(i + 1, buy_price, sell_price, volume))
 
+        # 신규 시작 시 초기 주문 즉시 등록 (헬스체크 대기 없이)
+        try:
+            if manual_resume and 1 <= resume_level <= max_levels:
+                # 재가동 차수 기준: 해당 차수 매도 + 다음 차수 매수 등록
+                sell_target = levels[resume_level - 1] if resume_level - 1 >= 0 else None
+                buy_target = levels[resume_level] if resume_level < len(levels) else None
+                place_pair_orders(sell_target=sell_target, buy_target=buy_target)
+            else:
+                # 기본: 1차 매수부터 시작
+                place_buy(levels[0], market)
+            persist_state()
+        except Exception as e:
+            print(f"⚠️ 초기 주문 등록 실패: {e}")
+
     strategy_info.update({
         "market": market,
         "start_price": start_price,

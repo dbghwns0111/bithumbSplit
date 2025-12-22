@@ -120,6 +120,8 @@ def restart_worker(market, config):
         resume_level = config.get('resume', 0)
         buy_gap = config.get('buy_gap', 0.2)
         sell_gap = config.get('sell_gap', 0.3)
+        buy_mode = config.get('buy_mode', 'percent')
+        sell_mode = config.get('sell_mode', 'percent')
         
         # 워커 스크립트 실행 (별도 프로세스로)
         cmd = [
@@ -130,22 +132,31 @@ def restart_worker(market, config):
             '--max-levels', str(int(max_levels)),
             '--buy-gap', str(buy_gap),
             '--sell-gap', str(sell_gap),
+            '--buy-mode', buy_mode,
+            '--sell-mode', sell_mode,
             '--resume-level', str(int(resume_level)),
         ]
         
         # 백그라운드에서 실행
+        log_path = os.path.join(LOGS_DIR, f'worker_{market}.log')
+        os.makedirs(LOGS_DIR, exist_ok=True)
+
+        # 로그 파일에 표준출력/표준에러를 기록하여 크래시 원인 파악
+        log_file = open(log_path, 'a', encoding='utf-8')
+
         if sys.platform == 'win32':
             proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=log_file,
                 creationflags=subprocess.CREATE_NEW_CONSOLE
             )
         else:
-            proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(cmd, stdout=log_file, stderr=log_file)
         
         active_processes[market] = proc.pid
         print(f"✅ [{market}] 프로세스 재시작 완료 (PID: {proc.pid})")
+        print(f"📝 로그: {log_path}")
         send_telegram_message(f"🔄 [{market}] 워커 프로세스 재시작됨 (하트비트 타임아웃)")
         return True
     except Exception as e:
