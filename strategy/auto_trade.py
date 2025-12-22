@@ -368,6 +368,25 @@ def run_auto_trade(start_price, krw_amount, max_levels,
         }
         _save_state(snapshot, market)
 
+    def _write_heartbeat():
+        """주기적으로 헬스 상태를 파일에 기록 (외부 Watchdog 감시용)"""
+        try:
+            heartbeat_file = os.path.join(_base_dir(), 'logs', f'heartbeat_{market.replace("-", "_")}.json')
+            _ensure_state_dir(market)
+            
+            heartbeat = {
+                "market": market,
+                "timestamp": datetime.now().isoformat(),
+                "status": "running",
+                "realized_profit": realized_profit,
+                "last_buy_level": next((lv.level for lv in reversed(levels) if lv.buy_filled), 0),
+                "pending_orders": sum(1 for lv in levels if lv.buy_uuid or lv.sell_uuid),
+            }
+            with open(heartbeat_file, 'w', encoding='utf-8') as f:
+                json.dump(heartbeat, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"⚠️ 헬스 하트비트 저장 실패: {e}")
+
     def place_pair_orders(sell_target=None, buy_target=None):
         """고변동성에서도 주문쌍이 반드시 만들어지도록 보호 로직."""
         if not sell_target and not buy_target:
@@ -672,6 +691,10 @@ def run_auto_trade(start_price, krw_amount, max_levels,
     # 헬스체크 카운터 (주기적으로 자동매매 상태 검증)
     health_check_counter = 0
     health_check_interval = 12  # 12번 루프마다 검증 (sleep_sec=5초 기준 약 1분)
+    
+    # 하트비트 카운터 (주기적으로 살아있음 신호 전송)
+    heartbeat_counter = 0
+    heartbeat_interval = 6  # 6번 루프마다 하트비트 (sleep_sec=5초 기준 약 30초)
 
     def perform_health_check():
         """자동매매 상태 검증 및 자동 복구"""
@@ -957,5 +980,11 @@ def run_auto_trade(start_price, krw_amount, max_levels,
         if health_check_counter >= health_check_interval:
             perform_health_check()
             health_check_counter = 0
+        
+        # 하트비트 기록 (주기적으로)
+        heartbeat_counter += 1
+        if heartbeat_counter >= heartbeat_interval:
+            _write_heartbeat()
+            heartbeat_counter = 0
 
         time.sleep(sleep_sec)
