@@ -374,9 +374,9 @@ market_enabled = {}
 # 각 마켓별로 입력 필드 생성
 markets = ['BTC', 'USDT', 'XRP']
 default_values = {
-    'BTC': {'price': 94000000, 'amount': 1000000, 'levels': 60, 'buy_gap': 0.2, 'sell_gap': 0.3, 'resume': 0, 'enabled': True},
-    'USDT': {'price': 1200, 'amount': 1000000, 'levels': 40, 'buy_gap': 0.2, 'sell_gap': 0.3, 'resume': 0, 'enabled': False},
-    'XRP': {'price': 2300, 'amount': 500000, 'levels': 50, 'buy_gap': 0.2, 'sell_gap': 0.3, 'resume': 0, 'enabled': True},
+    'BTC': {'price': 140000000, 'amount': 50000, 'levels': 60, 'buy_gap': 0.2, 'sell_gap': 0.3, 'resume': 0, 'enabled': False},
+    'USDT': {'price': 1500, 'amount': 50000, 'levels': 40, 'buy_gap': 0.2, 'sell_gap': 0.3, 'resume': 0, 'enabled': False},
+    'XRP': {'price': 3300, 'amount': 40000, 'levels': 100, 'buy_gap': 5, 'sell_gap': 7, 'resume': 0, 'enabled': False},
 }
 
 for idx, market in enumerate(markets):

@@ -25,6 +25,7 @@ from api.api import get_order_list
 
 LOGS_DIR = os.path.join(base_path, 'logs')
 CONFIG_DIR = os.path.join(base_path, 'config')
+DIST_CONFIG_FILE = os.path.join(base_path, 'dist', 'config', 'markets_config.json')
 MARKETS_CONFIG_FILE = os.path.join(CONFIG_DIR, 'markets_config.json')
 HEARTBEAT_TIMEOUT = 120  # 2분 이상 응답 없으면 재시작
 CHECK_INTERVAL = 30  # 30초마다 체크
@@ -41,15 +42,24 @@ WATCHDOG_START_TIME = datetime.now()
 active_processes = {}
 
 def load_markets_config():
-    """markets_config.json에서 마켓 설정 로드"""
+    """markets_config.json에서 마켓 설정 로드 (dist/config fallback)"""
     try:
-        if not os.path.exists(MARKETS_CONFIG_FILE):
-            print(f"⚠️  markets_config.json 파일을 찾을 수 없습니다.")
-            print(f"   경로: {MARKETS_CONFIG_FILE}")
+        config_path = MARKETS_CONFIG_FILE
+        fallback_path = DIST_CONFIG_FILE
+
+        if os.path.exists(config_path):
+            pass
+        elif os.path.exists(fallback_path):
+            config_path = fallback_path
+            print(f"ℹ️ dist/config 경로에서 설정을 로드합니다: {config_path}")
+        else:
+            print(f"⚠️ markets_config.json 파일을 찾을 수 없습니다.")
+            print(f"   기본 경로: {MARKETS_CONFIG_FILE}")
+            print(f"   dist 경로: {fallback_path}")
             print(f"   GUI에서 '설정 저장 & 자동매매 시작'을 클릭해주세요.")
             return {}
-        
-        with open(MARKETS_CONFIG_FILE, 'r', encoding='utf-8') as f:
+
+        with open(config_path, 'r', encoding='utf-8') as f:
             configs = json.load(f)
         
         print(f"✅ markets_config.json 로드 완료: {list(configs.keys())}")

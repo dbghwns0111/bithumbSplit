@@ -1,7 +1,8 @@
 @echo off
-REM Watchdog 시작 배치 파일
-REM 이 파일을 작업 스케줄러에 등록하면 자동 실행됩니다
+REM Watchdog 시작 배치 파일 (작업 스케줄러 등록용)
 
-cd /d C:\Users\USER\VS_CODE\BithumbSplit
+REM 현재 배치파일 위치로 이동
+cd /d "%~dp0"
+
 python watchdog.py
 pause
