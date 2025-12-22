@@ -6,6 +6,7 @@ import sys
 import customtkinter as ctk
 import threading
 import time
+import json
 from datetime import datetime
 from tkinter import messagebox
 import queue
@@ -223,160 +224,90 @@ def initialize_order_cards(max_levels):
     except Exception as e:
         print(f"[ERROR] initialize_order_cards: {e}")
 
+def save_markets_config():
+    """여러 마켓 설정을 markets_config.json으로 저장"""
+    try:
+        # 입력값 수집
+        configs = {}
+        
+        # BTC, USDT, XRP 마켓별 설정 수집
+        for market_idx, market_name in enumerate(['BTC', 'USDT', 'XRP']):
+            try:
+                start_price = float(market_entries[market_name]['price'].get())
+                krw_amount = float(market_entries[market_name]['amount'].get())
+                max_levels = int(market_entries[market_name]['levels'].get())
+                buy_gap = float(market_entries[market_name]['buy_gap'].get())
+                sell_gap = float(market_entries[market_name]['sell_gap'].get())
+                buy_mode_val = buy_modes[market_name].get()
+                sell_mode_val = sell_modes[market_name].get()
+                
+                # 검증
+                if start_price <= 0:
+                    messagebox.showerror("입력 오류", f"{market_name}: 시작가는 0보다 커야 합니다.")
+                    return False
+                if krw_amount <= 0:
+                    messagebox.showerror("입력 오류", f"{market_name}: 매수금액은 0보다 커야 합니다.")
+                    return False
+                if max_levels <= 0:
+                    messagebox.showerror("입력 오류", f"{market_name}: 최대차수는 1 이상이어야 합니다.")
+                    return False
+                
+                configs[market_name] = {
+                    'start_price': start_price,
+                    'krw_amount': krw_amount,
+                    'max_levels': max_levels,
+                    'buy_gap': buy_gap,
+                    'buy_mode': buy_mode_val,
+                    'sell_gap': sell_gap,
+                    'sell_mode': sell_mode_val
+                }
+            except ValueError:
+                messagebox.showerror("입력 오류", f"{market_name}: 숫자 필드에 올바른 값을 입력해주세요.")
+                return False
+        
+        # markets_config.json 저장
+        config_dir = base_path / 'config'
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / 'markets_config.json'
+        
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(configs, f, indent=2, ensure_ascii=False)
+        
+        return True
+    
+    except Exception as e:
+        messagebox.showerror("오류", f"설정 저장 실패: {e}")
+        return False
+
 def start_strategy():
-    """전략 시작"""
+    """전략 시작 - Watchdog이 관리하도록 설정 저장"""
     global stop_flag, running_flag
 
     if running_flag:
         messagebox.showwarning("알림", "이미 전략이 실행 중입니다.")
         return
 
-    # 입력값 파싱 및 기본 검증
-    try:
-        market = entry_market.get().strip().upper()
-        start_price = float(entry_price.get())
-        krw_amount = float(entry_amount.get())
-        max_levels = int(entry_rounds.get())
-        buy_gap = float(entry_buy_gap.get())
-        sell_gap = float(entry_sell_gap.get())
-        resume_level_str = entry_resume_level.get().strip()
-        resume_level = int(resume_level_str) if resume_level_str else 0
-    except ValueError:
-        messagebox.showerror("입력 오류", "숫자 필드에 올바른 값을 입력해주세요.")
-        return
-
-    if not market:
-        messagebox.showerror("입력 오류", "코인을 입력해주세요.")
-        return
-    if start_price <= 0:
-        messagebox.showerror("입력 오류", "시작가는 0보다 커야 합니다.")
-        return
-    if krw_amount <= 0:
-        messagebox.showerror("입력 오류", "매수금액은 0보다 커야 합니다.")
-        return
-    if max_levels <= 0:
-        messagebox.showerror("입력 오류", "최대차수는 1 이상이어야 합니다.")
-        return
-    if buy_gap <= 0:
-        messagebox.showerror("입력 오류", "매수 간격은 0보다 커야 합니다.")
-        return
-    if sell_gap <= 0:
-        messagebox.showerror("입력 오류", "매도 간격은 0보다 커야 합니다.")
-        return
-    if resume_level < 0 or resume_level > max_levels:
-        messagebox.showerror("입력 오류", f"재시작 차수는 0~{max_levels} 사이여야 합니다.")
-        return
-
-    estimated_cost = krw_amount * max_levels
-    if estimated_cost > 10000000:  # 1000만원 이상
-        if not messagebox.askokcancel(
-            "확인",
-            f"예상 총 비용: {estimated_cost:,.0f}원\n\n진행하시겠습니까?"
-        ):
-            return
-
-    # 최종 실행 확인 (오입력/오클릭 방지)
-    confirm_msg = (
-        "전략을 시작하시겠습니까?\n\n"
-        f"코인: {market}\n"
-        f"시작가: {start_price:,.0f}원\n"
-        f"매수금액: {krw_amount:,.0f}원\n"
-        f"최대차수: {max_levels}차\n"
-        f"매수간격: {buy_gap} ({buy_mode.get()})\n"
-        f"매도간격: {sell_gap} ({sell_mode.get()})\n"
-        f"재시작 차수: {resume_level if resume_level else '새 시작'}"
-    )
+    # 최종 확인
+    confirm_msg = "🚀 자동매매를 시작하시겠습니까?\n\n(Watchdog이 모든 마켓을 감시합니다)"
     if not messagebox.askokcancel("전략 실행 확인", confirm_msg):
         return
-
-    # 상태 플래그/버튼 업데이트
-    stop_flag = False
-    running_flag = True
-    btn_start.configure(state="disabled")
-    btn_stop.configure(state="normal")
-    label_status.configure(text="🚀 전략 실행 중", text_color="green")
-
-    def run_strategy_thread():
-        """전략 실행 스레드"""
-        global stop_flag, running_flag
-        try:
-            # 초기 상태 표시
-            app.after(0, lambda: initialize_order_cards(max_levels))
-
-            # 전략 메타 업데이트
-            strategy_info["market"] = market
-            strategy_info["start_price"] = start_price
-            strategy_info["realized_profit"] = 0.0
-
-            print(f"[DEBUG] 전략 실행 시작 - {market}, 시작가: {start_price}")
-
-            run_auto_trade(
-                start_price=start_price,
-                krw_amount=krw_amount,
-                max_levels=max_levels,
-                market_code=market,
-                buy_gap=buy_gap,
-                buy_mode=buy_mode.get(),
-                sell_gap=sell_gap,
-                sell_mode=sell_mode.get(),
-                stop_condition=stop_condition,
-                sleep_sec=5,
-                status_callback=update_order_status,
-                summary_callback=update_strategy_summary,
-                resume_level=resume_level,
-            )
-
-            if stop_flag:
-                app.after(0, lambda: messagebox.showwarning("전략 중단", "사용자에 의해 전략이 중단되었습니다."))
-                app.after(0, lambda: label_status.configure(text="🛑 전략 중단됨", text_color="red"))
-            else:
-                app.after(0, lambda: messagebox.showinfo("전략 완료", "전략이 성공적으로 완료되었습니다."))
-                app.after(0, lambda: label_status.configure(text="✅ 전략 완료", text_color="gray"))
-        except Exception as e:
-            import traceback
-
-            error_msg = f"전략 실행 중 오류 발생:\n{str(e)}"
-            print(f"[ERROR] {error_msg}")
-            print(f"[TRACEBACK] {traceback.format_exc()}")
-            app.after(0, lambda: messagebox.showerror("오류", error_msg))
-            app.after(0, lambda: label_status.configure(text="❌ 전략 오류", text_color="red"))
-        finally:
-            running_flag = False
-            app.after(0, lambda: btn_start.configure(state="normal"))
-            app.after(0, lambda: btn_stop.configure(state="disabled"))
-
-    threading.Thread(target=run_strategy_thread, daemon=True).start()
+    
+    # 설정 저장
+    if not save_markets_config():
+        return
+    
+    messagebox.showinfo("설정 저장 완료", "⚙️ 마켓 설정이 저장되었습니다.\n\n\"watchdog.bat\"을 실행하여 자동매매를 시작하세요.")
+    
+    # 또는 여기서 watchdog을 직접 시작할 수 있음 (선택사항)
+    # subprocess.Popen([python_exe, watchdog_script])
 
 def stop_strategy():
     """전략 중단"""
-    global stop_flag
     
-    if not running_flag:
-        messagebox.showwarning("알림", "실행 중인 전략이 없습니다.")
-        return
-
-    if not messagebox.askokcancel("전략 중단 확인", "전략을 중단하고 모든 주문을 취소할까요?"):
+    if not messagebox.askokcancel("전략 중단 확인", "⚠️ 모든 자동매매를 중단하시겠습니까?\n\n(Watchdog을 종료해야 완전히 중단됩니다)"):
         return
     
-    stop_flag = True
-    
-    try:
-        market = entry_market.get().strip().upper()
-        full_market = f"KRW-{market}"
-        
-        # 모든 주문 취소
-        cancel_all_orders(full_market)
-        send_telegram_message(f"🛑 {market} 전략 중단 및 주문 전체 취소 완료")
-        
-        label_status.configure(text="🛑 전략 중단 중...", text_color="orange")
-        current_level_label.configure(text="🛒 중단됨  |  📤 중단됨")
-        status_text_label.configure(text="⛔ 전략이 중단되었습니다.", text_color="red")
-            
-    except Exception as e:
-        error_msg = f"전략 중단 중 오류: {str(e)}"
-        print(f"[ERROR] {error_msg}")
-        send_telegram_message(f"⚠️ {error_msg}")
-        messagebox.showerror("오류", error_msg)
+    messagebox.showinfo("안내", "✅ 설정이 저장되었습니다.\n\n자동매매를 중단하려면 \"start_watchdog.bat\" 창을 닫으세요.")
 
 # 정기적으로 상태 업데이트 처리
 def periodic_update():
@@ -419,78 +350,77 @@ basic_frame = ctk.CTkFrame(input_frame)
 basic_frame.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
 basic_frame.columnconfigure((0, 1, 2, 3), weight=1)
 
-ctk.CTkLabel(basic_frame, text="기본 설정", font=ctk.CTkFont(size=14, weight="bold"))\
+ctk.CTkLabel(basic_frame, text="📊 마켓별 설정 (BTC / USDT / XRP)", font=ctk.CTkFont(size=14, weight="bold"))\
     .grid(row=0, column=0, columnspan=4, pady=(5, 10))
 
-# 코인 / 시작가
-ctk.CTkLabel(basic_frame, text="코인").grid(row=1, column=0, sticky="e", padx=5, pady=2)
-entry_market = ctk.CTkEntry(basic_frame)
-entry_market.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
+# 마켓별 입력 필드 저장용 딕셔너리
+market_entries = {}
+buy_modes = {}
+sell_modes = {}
 
-ctk.CTkLabel(basic_frame, text="시작가").grid(row=1, column=2, sticky="e", padx=5, pady=2)
-entry_price = ctk.CTkEntry(basic_frame)
-entry_price.grid(row=1, column=3, sticky="ew", padx=5, pady=2)
+# 각 마켓별로 입력 필드 생성
+markets = ['BTC', 'USDT', 'XRP']
+default_values = {
+    'BTC': {'price': 94000000, 'amount': 1000000, 'levels': 60, 'buy_gap': 0.2, 'sell_gap': 0.3},
+    'USDT': {'price': 1200, 'amount': 1000000, 'levels': 40, 'buy_gap': 0.2, 'sell_gap': 0.3},
+    'XRP': {'price': 2300, 'amount': 500000, 'levels': 50, 'buy_gap': 0.2, 'sell_gap': 0.3},
+}
 
-# 매수금액 / 최대차수
-ctk.CTkLabel(basic_frame, text="매수금액").grid(row=2, column=0, sticky="e", padx=5, pady=2)
-entry_amount = ctk.CTkEntry(basic_frame)
-entry_amount.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
-
-ctk.CTkLabel(basic_frame, text="최대차수").grid(row=2, column=2, sticky="e", padx=5, pady=2)
-entry_rounds = ctk.CTkEntry(basic_frame)
-entry_rounds.grid(row=2, column=3, sticky="ew", padx=5, pady=2)
-
-# 재시작 차수
-ctk.CTkLabel(basic_frame, text="재시작 차수").grid(row=3, column=0, sticky="e", padx=5, pady=2)
-entry_resume_level = ctk.CTkEntry(basic_frame)
-entry_resume_level.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
-entry_resume_level.insert(0, "0")  # 기본값 0
-
-ctk.CTkLabel(basic_frame, text="(0=새시작, N=N차부터)", font=ctk.CTkFont(size=10), text_color="gray")\
-    .grid(row=3, column=2, columnspan=2, sticky="w", padx=5, pady=2)
-
-# 간격 설정 프레임
-gap_frame = ctk.CTkFrame(input_frame)
-gap_frame.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="ew")
-gap_frame.columnconfigure((0, 1, 2, 3), weight=1)
-
-ctk.CTkLabel(gap_frame, text="매매 간격 설정", font=ctk.CTkFont(size=14, weight="bold"))\
-    .grid(row=0, column=0, columnspan=4, pady=(5, 10))
-
-# 매수 간격 (기본 퍼센트, 기본값 0.2%)
-buy_mode = ctk.StringVar(value="percent")
-ctk.CTkLabel(gap_frame, text="매수 간격").grid(row=1, column=0, sticky="e", padx=5, pady=2)
-entry_buy_gap = ctk.CTkEntry(gap_frame)
-entry_buy_gap.insert(0, "0.2")
-entry_buy_gap.grid(row=1, column=1, sticky="ew", padx=5, pady=2)
-
-frame_buy_mode = ctk.CTkFrame(gap_frame)
-frame_buy_mode.grid(row=1, column=2, columnspan=2, sticky="ew", padx=5, pady=2)
-ctk.CTkRadioButton(frame_buy_mode, text="퍼센트", variable=buy_mode, value="percent").pack(side="left", padx=4)
-ctk.CTkRadioButton(frame_buy_mode, text="금액(원)", variable=buy_mode, value="price").pack(side="left", padx=4)
-
-# 매도 간격 (기본 퍼센트, 기본값 0.3%)
-sell_mode = ctk.StringVar(value="percent")
-ctk.CTkLabel(gap_frame, text="매도 간격").grid(row=2, column=0, sticky="e", padx=5, pady=2)
-entry_sell_gap = ctk.CTkEntry(gap_frame)
-entry_sell_gap.insert(0, "0.3")
-entry_sell_gap.grid(row=2, column=1, sticky="ew", padx=5, pady=2)
-
-frame_sell_mode = ctk.CTkFrame(gap_frame)
-frame_sell_mode.grid(row=2, column=2, columnspan=2, sticky="ew", padx=5, pady=2)
-ctk.CTkRadioButton(frame_sell_mode, text="퍼센트", variable=sell_mode, value="percent").pack(side="left", padx=4)
-ctk.CTkRadioButton(frame_sell_mode, text="금액(원)", variable=sell_mode, value="price").pack(side="left", padx=4)
+for idx, market in enumerate(markets):
+    # 마켓 헤더
+    ctk.CTkLabel(basic_frame, text=f"🔹 {market}", font=ctk.CTkFont(size=12, weight="bold"))\
+        .grid(row=1+idx*2, column=0, sticky="w", padx=10, pady=(8, 2))
+    
+    # 가격 / 매수금액
+    ctk.CTkLabel(basic_frame, text="시작가", font=ctk.CTkFont(size=11)).grid(row=1+idx*2, column=0, sticky="e", padx=5, pady=2)
+    entry_price = ctk.CTkEntry(basic_frame, width=80)
+    entry_price.insert(0, str(default_values[market]['price']))
+    entry_price.grid(row=1+idx*2, column=1, sticky="ew", padx=5, pady=2)
+    
+    ctk.CTkLabel(basic_frame, text="매수금액", font=ctk.CTkFont(size=11)).grid(row=1+idx*2, column=2, sticky="e", padx=5, pady=2)
+    entry_amount = ctk.CTkEntry(basic_frame, width=80)
+    entry_amount.insert(0, str(default_values[market]['amount']))
+    entry_amount.grid(row=1+idx*2, column=3, sticky="ew", padx=5, pady=2)
+    
+    # 최대차수 / 간격
+    ctk.CTkLabel(basic_frame, text="최대차수", font=ctk.CTkFont(size=11)).grid(row=2+idx*2, column=0, sticky="e", padx=5, pady=2)
+    entry_levels = ctk.CTkEntry(basic_frame, width=80)
+    entry_levels.insert(0, str(default_values[market]['levels']))
+    entry_levels.grid(row=2+idx*2, column=1, sticky="ew", padx=5, pady=2)
+    
+    ctk.CTkLabel(basic_frame, text="매수/매도 간격", font=ctk.CTkFont(size=11)).grid(row=2+idx*2, column=2, sticky="e", padx=5, pady=2)
+    entry_buy_gap = ctk.CTkEntry(basic_frame, width=40)
+    entry_buy_gap.insert(0, str(default_values[market]['buy_gap']))
+    entry_buy_gap.grid(row=2+idx*2, column=3, sticky="w", padx=5, pady=2)
+    
+    entry_sell_gap = ctk.CTkEntry(basic_frame, width=40)
+    entry_sell_gap.insert(0, str(default_values[market]['sell_gap']))
+    entry_sell_gap.grid(row=2+idx*2, column=3, sticky="e", padx=5, pady=2)
+    
+    # 매매 모드 저장
+    buy_mode = ctk.StringVar(value="percent")
+    sell_mode = ctk.StringVar(value="percent")
+    
+    market_entries[market] = {
+        'price': entry_price,
+        'amount': entry_amount,
+        'levels': entry_levels,
+        'buy_gap': entry_buy_gap,
+        'sell_gap': entry_sell_gap,
+    }
+    buy_modes[market] = buy_mode
+    sell_modes[market] = sell_mode
 
 # 실행/중단 버튼 섹션
 button_frame = ctk.CTkFrame(input_frame)
-button_frame.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="ew")
+button_frame.grid(row=1, column=0, padx=10, pady=(10, 10), sticky="ew")
 button_frame.columnconfigure((0, 1), weight=1)
 
-btn_start = ctk.CTkButton(button_frame, text="🚀 전략 실행", command=start_strategy, 
+btn_start = ctk.CTkButton(button_frame, text="🚀 설정 저장 & 자동매매 시작", command=start_strategy, 
                          fg_color="#28a745", hover_color="#218838", height=45, 
                          font=ctk.CTkFont(size=14, weight="bold"))
-btn_stop = ctk.CTkButton(button_frame, text="🛑 전략 중단", command=stop_strategy, 
-                        fg_color="#dc3545", hover_color="#c82333", state="disabled", height=45,
+btn_stop = ctk.CTkButton(button_frame, text="🛑 자동매매 중단", command=stop_strategy, 
+                        fg_color="#dc3545", hover_color="#c82333", height=45,
                         font=ctk.CTkFont(size=14, weight="bold"))
 
 btn_start.grid(row=0, column=0, pady=10, sticky="ew", padx=(10, 5))
