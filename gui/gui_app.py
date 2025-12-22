@@ -275,6 +275,20 @@ def start_strategy():
         ):
             return
 
+    # 최종 실행 확인 (오입력/오클릭 방지)
+    confirm_msg = (
+        "전략을 시작하시겠습니까?\n\n"
+        f"코인: {market}\n"
+        f"시작가: {start_price:,.0f}원\n"
+        f"매수금액: {krw_amount:,.0f}원\n"
+        f"최대차수: {max_levels}차\n"
+        f"매수간격: {buy_gap} ({buy_mode.get()})\n"
+        f"매도간격: {sell_gap} ({sell_mode.get()})\n"
+        f"재시작 차수: {resume_level if resume_level else '새 시작'}"
+    )
+    if not messagebox.askokcancel("전략 실행 확인", confirm_msg):
+        return
+
     # 상태 플래그/버튼 업데이트
     stop_flag = False
     running_flag = True
@@ -339,6 +353,9 @@ def stop_strategy():
     
     if not running_flag:
         messagebox.showwarning("알림", "실행 중인 전략이 없습니다.")
+        return
+
+    if not messagebox.askokcancel("전략 중단 확인", "전략을 중단하고 모든 주문을 취소할까요?"):
         return
     
     stop_flag = True

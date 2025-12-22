@@ -103,6 +103,44 @@ def _safe_get_order_detail(order_uuid):
         return {"status": "9999", "message": str(e)}
 
 
+def _safe_float(value, default=0.0):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _is_order_filled(data: dict):
+    """다양한 필드명을 허용하여 체결 여부를 판별한다."""
+    state = str(data.get('state') or data.get('ord_state') or data.get('order_state') or '').lower()
+    status_text = str(data.get('status_text') or '').lower()
+
+    executed = _safe_float(
+        data.get('executed_volume')
+        or data.get('executed_qty')
+        or data.get('acc_trade_volume')
+        or data.get('traded_volume')
+    )
+    remaining = _safe_float(
+        data.get('remaining_volume')
+        or data.get('remaining_qty')
+        or data.get('remain_qty')
+        or data.get('remain_volume')
+    )
+
+    done_states = {'done', 'completed', 'filled', 'fully_filled', 'terminated'}
+    if state in done_states or status_text in done_states:
+        return True, executed, remaining
+
+    if executed > 0 and remaining <= 1e-12:
+        return True, executed, remaining
+
+    if remaining == 0 and (state or status_text):
+        return True, executed, remaining
+
+    return False, executed, remaining
+
+
 def _params_match(state, market, start_price, krw_amount, max_levels, buy_gap, buy_mode, sell_gap, sell_mode):
     return (
         state.get("market") == market and
@@ -614,11 +652,21 @@ def run_auto_trade(start_price, krw_amount, max_levels,
 
         persist_state()
 
-    # 재개 시 주문이 하나도 없으면 1차 매수부터 다시 등록
+    # 재개 시 주문이 하나도 없으면 마지막 체결 차수 기준으로 재등록
     if resume_state:
         has_pending = any((lv.buy_uuid or lv.sell_uuid) for lv in levels)
         if not has_pending:
-            place_buy(levels[0], market)
+            last_filled_level = max([lv.level for lv in levels if lv.buy_filled], default=0)
+
+            sell_target = None
+            if last_filled_level >= 2:
+                candidate = levels[last_filled_level - 2]  # 직전 차수 매도
+                if not candidate.sell_filled:
+                    sell_target = candidate
+
+            buy_target = levels[last_filled_level] if last_filled_level < len(levels) else None
+
+            place_pair_orders(sell_target=sell_target, buy_target=buy_target)
             persist_state()
 
     # 헬스체크 카운터 (주기적으로 자동매매 상태 검증)
@@ -657,6 +705,14 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                 if sell_target_local and not buy_target_local:
                     if sell_target_local.level < len(levels):
                         buy_target_local = levels[sell_target_local.level]
+
+                # 2-3-1) 매수만 열려 있고 직전 차수 매도가 없으면 보완: (buy_level-1)차 매도 필요
+                if buy_target_local and not sell_target_local:
+                    prev_idx = buy_target_local.level - 2
+                    if prev_idx >= 0:
+                        candidate = levels[prev_idx]
+                        if not candidate.sell_filled:
+                            sell_target_local = candidate
 
                 # 2-4) 열린 주문이 없으면 최근 체결 이력으로 추론 (마지막 체결 차수의 다음 차수 매수)
                 if not sell_target_local and not buy_target_local:
@@ -756,9 +812,8 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                 if level.buy_uuid and not level.buy_filled:
                     detail = _safe_get_order_detail(level.buy_uuid)
                     data = detail.get('data') or detail
-                    executed = float(data.get('executed_volume', 0))
-                    remaining = float(data.get('remaining_volume', 0))
-                    if executed > 0 and remaining == 0:
+                    filled, executed, remaining = _is_order_filled(data)
+                    if filled:
                         level.buy_filled = True
                         callback_flags['buy'].add(level.level)
 
@@ -810,9 +865,8 @@ def run_auto_trade(start_price, krw_amount, max_levels,
                 if level.sell_uuid and not level.sell_filled:
                     detail = _safe_get_order_detail(level.sell_uuid)
                     data = detail.get('data') or detail
-                    executed = float(data.get('executed_volume', 0))
-                    remaining = float(data.get('remaining_volume', 0))
-                    if executed > 0 and remaining == 0:
+                    filled, executed, remaining = _is_order_filled(data)
+                    if filled:
                         level.sell_filled = True
                         callback_flags['sell'].add(level.level)
 
