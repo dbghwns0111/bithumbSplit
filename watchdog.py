@@ -44,7 +44,7 @@ def load_markets_config():
     """markets_config.json에서 마켓 설정 로드"""
     try:
         if not os.path.exists(MARKETS_CONFIG_FILE):
-            print(f"⚠️ markets_config.json 파일을 찾을 수 없습니다.")
+            print(f"⚠️  markets_config.json 파일을 찾을 수 없습니다.")
             print(f"   경로: {MARKETS_CONFIG_FILE}")
             print(f"   GUI에서 '설정 저장 & 자동매매 시작'을 클릭해주세요.")
             return {}
@@ -147,23 +147,27 @@ def check_and_restart(markets_config):
     """하트비트 확인 및 필요 시 재시작"""
     os.makedirs(LOGS_DIR, exist_ok=True)
     
-    # 모니터링할 마켓 결정
+    # 모니터링할 마켓 결정 (enabled=True만)
     if markets_config:
-        markets = list(markets_config.keys())
+        markets = [m for m, cfg in markets_config.items() if cfg.get('enabled', True)]
     else:
-        markets = DEFAULT_MARKETS
+        markets = []
+
+    if not markets:
+        print("⚠️ 활성화된 마켓이 없습니다. GUI에서 on/off를 설정하세요.")
+        return
     
     print(f"\n📍 모니터링 마켓: {', '.join(markets)}")
     print(f"⏱️ 타임아웃: {HEARTBEAT_TIMEOUT}초")
     print(f"📊 체크 주기: {CHECK_INTERVAL}초")
     print(f"📈 정기 리포트: {SUMMARY_INTERVAL//3600}시간마다\n")
     
-    # 초기 워커 시작
+    # 초기 워커 시작 (enabled만)
     for market in markets:
-        if market in markets_config:
+        if market in markets_config and markets_config[market].get('enabled', True):
             restart_worker(market, markets_config[market])
         else:
-            print(f"⚠️ [{market}] 설정이 없습니다.")
+            print(f"⚠️ [{market}] 설정이 없거나 비활성화되었습니다.")
     
     last_summary_time = time.time()
     
@@ -185,7 +189,7 @@ def check_and_restart(markets_config):
                         print(f"\n⚠️ [{market}] 응답 없음 (누적수익: {profit:,.0f}원, 미체결: {pending}개)")
                     
                     # 재시작
-                    if market in markets_config:
+                    if market in markets_config and markets_config[market].get('enabled', True):
                         restart_worker(market, markets_config[market])
                 else:
                     hb = read_heartbeat(market)
