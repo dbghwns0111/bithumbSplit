@@ -107,6 +107,7 @@ def restart_worker(market, config):
         start_price = config.get('start_price', 100000)
         krw_amount = config.get('krw_amount', 1000000)
         max_levels = config.get('max_levels', 60)
+        resume_level = config.get('resume', 0)
         buy_gap = config.get('buy_gap', 0.2)
         sell_gap = config.get('sell_gap', 0.3)
         
@@ -119,6 +120,7 @@ def restart_worker(market, config):
             '--max-levels', str(int(max_levels)),
             '--buy-gap', str(buy_gap),
             '--sell-gap', str(sell_gap),
+            '--resume-level', str(int(resume_level)),
         ]
         
         # 백그라운드에서 실행

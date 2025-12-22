@@ -236,6 +236,7 @@ def save_markets_config():
                 start_price = float(market_entries[market_name]['price'].get())
                 krw_amount = float(market_entries[market_name]['amount'].get())
                 max_levels = int(market_entries[market_name]['levels'].get())
+                resume_level = int(market_entries[market_name]['resume'].get())
                 buy_gap = float(market_entries[market_name]['buy_gap'].get())
                 sell_gap = float(market_entries[market_name]['sell_gap'].get())
                 buy_mode_val = buy_modes[market_name].get()
@@ -251,11 +252,15 @@ def save_markets_config():
                 if max_levels <= 0:
                     messagebox.showerror("입력 오류", f"{market_name}: 최대차수는 1 이상이어야 합니다.")
                     return False
+                if resume_level < 0 or resume_level > max_levels:
+                    messagebox.showerror("입력 오류", f"{market_name}: 재가동 차수는 0~{max_levels} 사이여야 합니다.")
+                    return False
                 
                 configs[market_name] = {
                     'start_price': start_price,
                     'krw_amount': krw_amount,
                     'max_levels': max_levels,
+                    'resume': resume_level,
                     'buy_gap': buy_gap,
                     'buy_mode': buy_mode_val,
                     'sell_gap': sell_gap,
@@ -361,41 +366,49 @@ sell_modes = {}
 # 각 마켓별로 입력 필드 생성
 markets = ['BTC', 'USDT', 'XRP']
 default_values = {
-    'BTC': {'price': 94000000, 'amount': 1000000, 'levels': 60, 'buy_gap': 0.2, 'sell_gap': 0.3},
-    'USDT': {'price': 1200, 'amount': 1000000, 'levels': 40, 'buy_gap': 0.2, 'sell_gap': 0.3},
-    'XRP': {'price': 2300, 'amount': 500000, 'levels': 50, 'buy_gap': 0.2, 'sell_gap': 0.3},
+    'BTC': {'price': 94000000, 'amount': 1000000, 'levels': 60, 'buy_gap': 0.2, 'sell_gap': 0.3, 'resume': 0},
+    'USDT': {'price': 1200, 'amount': 1000000, 'levels': 40, 'buy_gap': 0.2, 'sell_gap': 0.3, 'resume': 0},
+    'XRP': {'price': 2300, 'amount': 500000, 'levels': 50, 'buy_gap': 0.2, 'sell_gap': 0.3, 'resume': 0},
 }
 
 for idx, market in enumerate(markets):
+    row_base = 1 + idx * 3
+
     # 마켓 헤더
     ctk.CTkLabel(basic_frame, text=f"🔹 {market}", font=ctk.CTkFont(size=12, weight="bold"))\
-        .grid(row=1+idx*2, column=0, sticky="w", padx=10, pady=(8, 2))
+        .grid(row=row_base, column=0, sticky="w", padx=10, pady=(8, 2))
     
     # 가격 / 매수금액
-    ctk.CTkLabel(basic_frame, text="시작가", font=ctk.CTkFont(size=11)).grid(row=1+idx*2, column=0, sticky="e", padx=5, pady=2)
+    ctk.CTkLabel(basic_frame, text="시작가", font=ctk.CTkFont(size=11)).grid(row=row_base+1, column=0, sticky="e", padx=5, pady=2)
     entry_price = ctk.CTkEntry(basic_frame, width=80)
     entry_price.insert(0, str(default_values[market]['price']))
-    entry_price.grid(row=1+idx*2, column=1, sticky="ew", padx=5, pady=2)
+    entry_price.grid(row=row_base+1, column=1, sticky="ew", padx=5, pady=2)
     
-    ctk.CTkLabel(basic_frame, text="매수금액", font=ctk.CTkFont(size=11)).grid(row=1+idx*2, column=2, sticky="e", padx=5, pady=2)
+    ctk.CTkLabel(basic_frame, text="매수금액", font=ctk.CTkFont(size=11)).grid(row=row_base+1, column=2, sticky="e", padx=5, pady=2)
     entry_amount = ctk.CTkEntry(basic_frame, width=80)
     entry_amount.insert(0, str(default_values[market]['amount']))
-    entry_amount.grid(row=1+idx*2, column=3, sticky="ew", padx=5, pady=2)
+    entry_amount.grid(row=row_base+1, column=3, sticky="ew", padx=5, pady=2)
     
-    # 최대차수 / 간격
-    ctk.CTkLabel(basic_frame, text="최대차수", font=ctk.CTkFont(size=11)).grid(row=2+idx*2, column=0, sticky="e", padx=5, pady=2)
+    # 최대차수 / 재가동 차수
+    ctk.CTkLabel(basic_frame, text="최대차수", font=ctk.CTkFont(size=11)).grid(row=row_base+2, column=0, sticky="e", padx=5, pady=2)
     entry_levels = ctk.CTkEntry(basic_frame, width=80)
     entry_levels.insert(0, str(default_values[market]['levels']))
-    entry_levels.grid(row=2+idx*2, column=1, sticky="ew", padx=5, pady=2)
+    entry_levels.grid(row=row_base+2, column=1, sticky="ew", padx=5, pady=2)
+
+    ctk.CTkLabel(basic_frame, text="재가동 차수", font=ctk.CTkFont(size=11)).grid(row=row_base+2, column=2, sticky="e", padx=5, pady=2)
+    entry_resume = ctk.CTkEntry(basic_frame, width=80)
+    entry_resume.insert(0, str(default_values[market]['resume']))
+    entry_resume.grid(row=row_base+2, column=3, sticky="ew", padx=5, pady=2)
     
-    ctk.CTkLabel(basic_frame, text="매수/매도 간격", font=ctk.CTkFont(size=11)).grid(row=2+idx*2, column=2, sticky="e", padx=5, pady=2)
+    # 매수/매도 간격
+    ctk.CTkLabel(basic_frame, text="매수/매도 간격", font=ctk.CTkFont(size=11)).grid(row=row_base+3, column=0, sticky="e", padx=5, pady=2)
     entry_buy_gap = ctk.CTkEntry(basic_frame, width=40)
     entry_buy_gap.insert(0, str(default_values[market]['buy_gap']))
-    entry_buy_gap.grid(row=2+idx*2, column=3, sticky="w", padx=5, pady=2)
+    entry_buy_gap.grid(row=row_base+3, column=1, sticky="w", padx=5, pady=2)
     
     entry_sell_gap = ctk.CTkEntry(basic_frame, width=40)
     entry_sell_gap.insert(0, str(default_values[market]['sell_gap']))
-    entry_sell_gap.grid(row=2+idx*2, column=3, sticky="e", padx=5, pady=2)
+    entry_sell_gap.grid(row=row_base+3, column=3, sticky="e", padx=5, pady=2)
     
     # 매매 모드 저장
     buy_mode = ctk.StringVar(value="percent")
@@ -405,6 +418,7 @@ for idx, market in enumerate(markets):
         'price': entry_price,
         'amount': entry_amount,
         'levels': entry_levels,
+        'resume': entry_resume,
         'buy_gap': entry_buy_gap,
         'sell_gap': entry_sell_gap,
     }
